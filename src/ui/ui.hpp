@@ -1,9 +1,10 @@
 #include "lvgl.h"
-#include "ui_helpers.h"
-#include "ui_events.h"
 
 // SCREEN: homeScreen
 void initHomeScreen(void);
-extern lv_obj_t *home;
+extern lv_obj_t *ui_home;
+extern lv_obj_t *ui_batPercent;
+extern lv_obj_t *ui_timeDigital;
+extern lv_obj_t *ui_date;
 
 void initUI();
