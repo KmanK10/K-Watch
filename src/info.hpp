@@ -8,7 +8,7 @@ struct Info {
         bool secondChanged = 1;
         bool minuteChanged = 1;
         bool hourChanged = 1;
-        bool refresh; // If the screen needs to be refreshed
+        bool refresh = 1; // If the screen needs to be refreshed
     } FlagInfo;
     FlagInfo flag;
 
@@ -16,7 +16,7 @@ struct Info {
         uint8_t hour;
         uint8_t minute;
         uint8_t second;
-        //uint8_t valSec;
+        uint8_t valSec;
         String date;
     } TimeInfo;
     TimeInfo time;

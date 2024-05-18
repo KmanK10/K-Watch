@@ -1,4 +1,4 @@
-#include "./utilityFunctions.hpp"
+#include "utilityFunctions.hpp"
 
 // Makes the haptic motor buzz
 void vibrate() {

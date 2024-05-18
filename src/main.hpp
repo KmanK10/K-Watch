@@ -8,3 +8,4 @@
 
 void setup();
 void loop();
+void updateBattery();

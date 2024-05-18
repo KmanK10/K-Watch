@@ -3,6 +3,8 @@
 // SCREEN: homeScreen
 void initHomeScreen();
 lv_obj_t *ui_home;
+lv_obj_t *ui_batIcon;
+lv_obj_t *ui_batBar;
 lv_obj_t *ui_batPercent;
 lv_obj_t *ui_timeDigital;
 lv_obj_t *ui_date;
