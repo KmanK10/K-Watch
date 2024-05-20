@@ -3,6 +3,10 @@
 
 #include "lvgl.h"
 
+// Themes
+extern lv_theme_t *lightTheme;
+extern lv_theme_t *darkTheme;
+
 // SCREEN: homeScreen
 void initHomeScreen(void);
 extern lv_obj_t *ui_home;

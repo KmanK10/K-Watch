@@ -13,6 +13,7 @@ void initHomeScreen() {
     ui_batBar = lv_bar_create(ui_batIcon);
     lv_obj_align(ui_batBar, LV_ALIGN_TOP_RIGHT, -6, 2);
     lv_obj_set_style_bg_color(ui_batBar, lv_color_white(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(ui_batBar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_radius(ui_batBar, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
     lv_obj_set_style_width(ui_batBar, 32, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_height(ui_batBar, 14, LV_PART_MAIN | LV_STATE_DEFAULT);
