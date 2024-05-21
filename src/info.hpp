@@ -9,6 +9,7 @@ struct Info {
         bool minuteChanged = 1;
         bool hourChanged = 1;
         bool refresh = 1; // If the screen needs to be refreshed
+        bool refreshBatColor = 1;
     } FlagInfo;
     FlagInfo flag;
 
