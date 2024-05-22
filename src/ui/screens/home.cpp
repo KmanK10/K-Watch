@@ -5,7 +5,7 @@ void initHomeScreen() {
 
     ui_home = lv_tileview_add_tile(ui_mainTV, 1, 0, LV_DIR_LEFT);
 
-    ui_batIcon = lv_img_create(ui_home);
+    lv_obj_t *ui_batIcon = lv_img_create(ui_home);
     lv_img_set_src(ui_batIcon, &battery);
     lv_obj_align(ui_batIcon, LV_ALIGN_TOP_RIGHT, 0, 0);
 

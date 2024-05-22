@@ -68,7 +68,6 @@ void loop() {
                 initMainScreen();
                 lv_scr_load(ui_main);
             }
-            
         }
 
         // Started charging

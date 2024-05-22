@@ -8,7 +8,6 @@ lv_obj_t *ui_mainTV;
 // SCREEN: homeScreen
 void initHomeScreen(void);
 lv_obj_t *ui_home;
-lv_obj_t *ui_batIcon;
 lv_obj_t *ui_batBar;
 lv_obj_t *ui_batPercent;
 lv_obj_t *ui_timeDigital;
