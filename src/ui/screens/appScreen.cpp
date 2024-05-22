@@ -15,7 +15,7 @@ void initAppScreen(void) {
     // Flashlight
     LV_IMG_DECLARE(flashlight);
     lv_obj_t *ui_flashlightBtn = lv_btn_create(ui_appsList);
-    createAppBtn(ui_flashlightBtn, &flashlight, 128, "Flashlight");
+    createAppBtn(ui_flashlightBtn, &flashlight, 256, "Flashlight");
     lv_obj_add_event_cb(ui_flashlightBtn, [](lv_event_t *e){initFlashlight(); lv_scr_load(ui_flashlight);}, LV_EVENT_CLICKED, NULL);
 }
 

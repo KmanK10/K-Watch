@@ -21,6 +21,11 @@ struct Info {
         String date;
     } TimeInfo;
     TimeInfo time;
+
+    typedef struct {
+        int brightness = 100;
+    } UtilityInfo;
+    UtilityInfo utility;
 };
 
 #endif
