@@ -12,6 +12,18 @@ void initAppScreen(void) {
     lv_obj_set_size(ui_appsList, 240, 240);
     lv_obj_set_style_pad_row(ui_appsList, 5, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    lv_obj_t *ui_appLabel = lv_label_create(ui_appsList);
+    lv_label_set_text(ui_appLabel, "Apps");
+    lv_obj_set_style_text_color(ui_appLabel, lv_color_white(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_appLabel, &lv_font_montserrat_24, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_center(ui_appLabel);
+
+    // Settings
+    LV_IMG_DECLARE(settings);
+    lv_obj_t *ui_settingsBtn = lv_btn_create(ui_appsList);
+    createAppBtn(ui_settingsBtn, &settings, 512, "Settings");
+    lv_obj_add_event_cb(ui_settingsBtn, [](lv_event_t *e){initSettingsScreen(); lv_scr_load(ui_settings);}, LV_EVENT_CLICKED, NULL);
+
     // Flashlight
     LV_IMG_DECLARE(flashlight);
     lv_obj_t *ui_flashlightBtn = lv_btn_create(ui_appsList);
@@ -26,7 +38,7 @@ void createAppBtn(lv_obj_t *btn, const lv_img_dsc_t* src, int zoom, String name)
     lv_obj_t *icon = lv_img_create(btn);
     lv_img_set_src(icon, src);
     lv_img_set_zoom(icon, zoom);
-    lv_obj_align(icon, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_align(icon, LV_ALIGN_LEFT_MID, 5, 0);
 
     lv_obj_t *label = lv_label_create(btn);
     lv_obj_set_style_text_color(label, lv_color_white(), LV_PART_MAIN | LV_STATE_DEFAULT);

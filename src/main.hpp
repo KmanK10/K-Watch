@@ -2,10 +2,11 @@
 #include <LV_Helper.h>
 
 #include "ui/ui.hpp"
-#include "utilityFunctions.hpp"
-#include "timeFunctions.hpp"
-#include "info.hpp"
+#include "utility/timeFunctions.hpp"
+#include "utility/info.hpp"
 
 void setup();
 void loop();
+void wake();
 void updateBattery();
+void vibrate();

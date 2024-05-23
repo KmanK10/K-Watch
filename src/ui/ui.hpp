@@ -2,14 +2,15 @@
 #include <LV_Helper.h>
 
 #include "lvgl.h"
-#include "info.hpp"
+#include "utility/info.hpp"
 
-// Screens
+// SCREENS
+// Screen: main
 void initMainScreen(void);
 extern lv_obj_t *ui_main;
 extern lv_obj_t *ui_mainTV;
 
-// SCREEN: homeScreen
+// Screen: homeScreen
 void initHomeScreen(void);
 extern lv_obj_t *ui_home;
 extern lv_obj_t *ui_batBar;
@@ -17,11 +18,15 @@ extern lv_obj_t *ui_batPercent;
 extern lv_obj_t *ui_timeDigital;
 extern lv_obj_t *ui_date;
 
-// SCREEN: apps
+// Screen: apps
 void initAppScreen(void);
 extern lv_obj_t *ui_apps;
 
-// SCREEN: flashlight
+// Screen: settings
+void initSettingsScreen(void);
+extern lv_obj_t *ui_settings;
+
+// screen: flashlight
 void initFlashlight(void);
 extern lv_obj_t *ui_flashlight;
 

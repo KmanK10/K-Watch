@@ -23,6 +23,8 @@ struct Info {
     TimeInfo time;
 
     typedef struct {
+        bool sleep = true; // Whether to sleep or not
+        int sleepCounter = 0;
         int brightness = 100;
     } UtilityInfo;
     UtilityInfo utility;

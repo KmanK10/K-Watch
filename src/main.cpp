@@ -4,8 +4,12 @@ TFT_eSPI tft;
 
 Info info; // Create the info struct
 
-// Variables:
+// VARIABLES
+// IRQs
 bool pmuIRQ = false; // Whether there is a PMU IRQ or not
+// Sleep
+bool asleep = false;
+// Battery
 bool charging = 0;
 int batPercent;
 int realPercent;
@@ -46,8 +50,6 @@ void setup() {
 }
 
 void loop() {
-    handleTime();
-
     // Handles power interupt requests
     if (pmuIRQ) {
         watch.readPMU();
@@ -68,39 +70,68 @@ void loop() {
                 initMainScreen();
                 lv_scr_load(ui_main);
             }
-        }
 
-        // Started charging
-		else if (watch.isBatChagerStartIrq()) {
-            charging = true;
-            info.flag.refreshBatColor = true;
-            vibrate();
+            if (asleep) wake();
         }
 
         watch.clearPMU();
     }
 
-    // Update once per second
-    if (info.flag.secondChanged || info.flag.refresh) {
-        // Started and stopped charging
-        if (charging && !watch.isCharging()) {
-            charging = false;
-            info.flag.refreshBatColor = true;
-        }
+    // Started charging
+    if (!charging && watch.isCharging()) {
+        charging = true;
+        info.flag.refreshBatColor = true;
+        vibrate();
 
-        // Check if we are on the main screen
-        if (lv_disp_get_scr_act(NULL) == ui_main) {
-            // Check if we are on the home screen
-            if (lv_tileview_get_tile_act(ui_mainTV) == ui_home) {
-                updateBattery();
-                writeTime();
-            }
-        }
+        if (asleep) wake();
     }
 
-    delay(lv_task_handler()); // Lets the GUI run in the background
+    if (asleep && watch.getTouched()) wake();
 
-    info.flag.refresh = false;
+    // Sleep
+    if (info.utility.sleep && info.flag.secondChanged) {
+        if (!asleep && info.utility.sleepCounter >= 3) {
+            asleep = true;
+            info.utility.sleepCounter = 0;
+            watch.setBrightness(0);
+        } else if (!asleep) info.utility.sleepCounter++;
+    }
+
+    // Normal awake operation
+    if (!asleep) {
+        // Update once per second
+        if (info.flag.secondChanged || info.flag.refresh) {
+            // Started and stopped charging
+            if (charging && !watch.isCharging()) {
+                charging = false;
+                info.flag.refreshBatColor = true;
+            }
+
+            // Check if we are on the main screen
+            if (lv_disp_get_scr_act(NULL) == ui_main) {
+                // Check if we are on the home screen
+                if (lv_tileview_get_tile_act(ui_mainTV) == ui_home) {
+                    updateBattery();
+                    writeTime();
+                }
+            }
+        }
+
+        delay(lv_task_handler()); // Lets the GUI run in the background
+
+        info.flag.refresh = false;
+    }
+
+    handleTime();
+}
+
+// Wake up watch
+void wake() {
+    Serial.println("Waking up");
+    asleep = false;
+    info.flag.refresh = true;
+    info.flag.refreshBatColor = true;
+    watch.setBrightness(info.utility.brightness);
 }
 
 // Set battery indicators
@@ -130,4 +161,13 @@ void updateBattery() {
     else if (realPercent > 20 && batPercent <= 20) lv_obj_set_style_bg_color(ui_batBar, lv_color_white(), LV_PART_INDICATOR | LV_STATE_DEFAULT); // Make percent bar white
 
     batPercent = realPercent;
+}
+
+// UTILITY FUNCTIONS
+// Makes the haptic motor buzz
+void vibrate() {
+	// set the effect to play
+    watch.setWaveform(0, 14);  // play effect
+    // play the effect
+    watch.run();
 }

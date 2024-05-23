@@ -564,13 +564,6 @@ int16_t LilyGoLib::sleep()
     return 0;
 }
 
-
-
-
-
-
-
-
 LilyGoLib watch;
 
 
