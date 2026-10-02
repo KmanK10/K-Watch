@@ -4,9 +4,9 @@
 #include <strings.h>
 
 #include "lvgl.h"
+#include "ui/screens.h"
 #include "ui/text.h"
 #include "ui/theme.h"
-#include "ui/watchface.h"
 
 #define LIST_MAX     10
 #define CONTENT_W    200
@@ -21,7 +21,6 @@ static lv_obj_t *s_card_subtitle;
 static lv_obj_t *s_card_message;
 static lv_obj_t *s_card_actions;
 static uint32_t s_card_uid;
-static bool s_card_from_list;
 
 static lv_obj_t *s_list;
 static lv_obj_t *s_list_items;
@@ -64,33 +63,19 @@ static bool card_showing(void)
     return s_card && lv_screen_active() == s_card;
 }
 
-static bool list_showing(void)
-{
-    return s_list && lv_screen_active() == s_list;
-}
+// ---- Card (overlay) ----
 
-// ---- Card ----
-
-static void card_back(void)
-{
-    if (s_card_from_list) {
-        notify_show_list();
-    } else {
-        watchface_show();
-    }
-}
-
-static void on_card_back(lv_event_t *e)
+static void on_card_tap(lv_event_t *e)
 {
     (void)e;
-    card_back();
+    ui_close_overlay();
 }
 
 static void on_action(lv_event_t *e)
 {
     bool positive = (bool)(uintptr_t)lv_event_get_user_data(e);
     phone_notification_action(s_card_uid, positive);
-    card_back();
+    ui_close_overlay();
 }
 
 static lv_obj_t *card_label(const lv_font_t *font, lv_color_t color)
@@ -113,8 +98,8 @@ static void create_card(void)
     lv_obj_set_scrollable(s_card, true);
     lv_obj_set_scroll_dir(s_card, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s_card, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_add_event_cb(s_card, on_card_back, LV_EVENT_SHORT_CLICKED, NULL);
-    ui_on_swipe(s_card, LV_EVENT_GESTURE_RIGHT, card_back);
+    lv_obj_add_event_cb(s_card, on_card_tap, LV_EVENT_SHORT_CLICKED, NULL);
+    ui_on_swipe(s_card, LV_EVENT_GESTURE_RIGHT, ui_close_overlay);
 
     s_card_app = card_label(&lv_font_montserrat_16, UI_COLOR_ACCENT);
     s_card_title = card_label(&lv_font_montserrat_20, lv_color_white());
@@ -134,6 +119,7 @@ static void add_action(const char *symbol, lv_color_t color, bool positive)
 {
     lv_obj_t *btn = ui_round_button(s_card_actions, symbol, 52, color);
     lv_obj_add_event_cb(btn, on_action, LV_EVENT_CLICKED, (void *)(uintptr_t)positive);
+    lv_obj_set_gesture_bubble(btn, true);
 }
 
 void notify_show_card(uint32_t uid)
@@ -146,7 +132,6 @@ void notify_show_card(uint32_t uid)
     if (!s_card) {
         create_card();
     }
-    s_card_from_list = list_showing() || (card_showing() && s_card_from_list);
     s_card_uid = uid;
 
     bool call = n->category == PHONE_CAT_INCOMING_CALL;
@@ -175,38 +160,14 @@ void notify_show_card(uint32_t uid)
     lv_obj_set_hidden(s_card_actions, lv_obj_get_child_count(s_card_actions) == 0);
 
     lv_obj_scroll_to_y(s_card, 0, LV_ANIM_OFF);
-    lv_screen_load(s_card);
+    ui_show_overlay(s_card);
 }
 
-// ---- List ----
+// ---- List (grid screen) ----
 
 static void on_item_clicked(lv_event_t *e)
 {
     notify_show_card((uint32_t)(uintptr_t)lv_event_get_user_data(e));
-}
-
-static void create_list(void)
-{
-    s_list = ui_screen_create();
-    lv_obj_set_scrollable(s_list, true);
-    lv_obj_set_scroll_dir(s_list, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(s_list, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_style_pad_top(s_list, 16, 0);
-    lv_obj_set_style_pad_bottom(s_list, 40, 0);
-    lv_obj_set_style_pad_row(s_list, 8, 0);
-    lv_obj_set_flex_flow(s_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(s_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    ui_on_swipe(s_list, LV_EVENT_GESTURE_RIGHT, watchface_show);
-
-    lv_obj_t *heading = ui_label(s_list, &lv_font_montserrat_16, UI_COLOR_ACCENT);
-    lv_label_set_text(heading, LV_SYMBOL_BELL " Notifications");
-
-    s_list_items = lv_obj_create(s_list);
-    lv_obj_remove_style_all(s_list_items);
-    lv_obj_set_size(s_list_items, CONTENT_W, LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_row(s_list_items, 8, 0);
-    lv_obj_set_flex_flow(s_list_items, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_gesture_bubble(s_list_items, true);
 }
 
 static lv_obj_t *item_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t color,
@@ -221,6 +182,9 @@ static lv_obj_t *item_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t 
 
 static void rebuild_list(void)
 {
+    if (!s_list_items) {
+        return;
+    }
     lv_obj_clean(s_list_items);
     if (s_count == 0) {
         lv_obj_t *empty = ui_label(s_list_items, &lv_font_montserrat_16, UI_COLOR_DIM);
@@ -254,14 +218,32 @@ static void rebuild_list(void)
     }
 }
 
-void notify_show_list(void)
+void notify_list_create(lv_obj_t *parent)
 {
-    if (!s_list) {
-        create_list();
-    }
+    s_list = parent;
+    lv_obj_set_scroll_dir(s_list, LV_DIR_VER);
+    lv_obj_set_style_pad_top(s_list, 16, 0);
+    lv_obj_set_style_pad_bottom(s_list, 40, 0);
+    lv_obj_set_style_pad_row(s_list, 8, 0);
+    lv_obj_set_flex_flow(s_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *heading = ui_label(s_list, &lv_font_montserrat_16, UI_COLOR_ACCENT);
+    lv_label_set_text(heading, LV_SYMBOL_BELL " Notifications");
+
+    s_list_items = lv_obj_create(s_list);
+    lv_obj_remove_style_all(s_list_items);
+    lv_obj_set_size(s_list_items, CONTENT_W, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_row(s_list_items, 8, 0);
+    lv_obj_set_flex_flow(s_list_items, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_gesture_bubble(s_list_items, true);
+
     rebuild_list();
+}
+
+void notify_list_on_show(void)
+{
     lv_obj_scroll_to_y(s_list, 0, LV_ANIM_OFF);
-    lv_screen_load(s_list);
 }
 
 // ---- Store ----
@@ -275,9 +257,7 @@ void notify_add(const phone_notification_t *n)
     if (existing < 0 && s_count < LIST_MAX) {
         s_count++;
     }
-    if (list_showing()) {
-        rebuild_list();
-    }
+    rebuild_list();
 }
 
 void notify_remove(uint32_t uid)
@@ -288,20 +268,18 @@ void notify_remove(uint32_t uid)
     }
     memmove(&s_items[i], &s_items[i + 1], (s_count - i - 1) * sizeof(s_items[0]));
     s_count--;
+    rebuild_list();
 
     if (card_showing() && s_card_uid == uid) {
-        card_back();
-    } else if (list_showing()) {
-        rebuild_list();
+        ui_close_overlay();
     }
 }
 
 void notify_clear(void)
 {
     s_count = 0;
+    rebuild_list();
     if (card_showing()) {
-        card_back();
-    } else if (list_showing()) {
-        rebuild_list();
+        ui_close_overlay();
     }
 }

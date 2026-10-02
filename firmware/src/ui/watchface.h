@@ -4,8 +4,9 @@
 #include <stdint.h>
 #include <time.h>
 
-void watchface_create(void);
-void watchface_show(void);
+#include "lvgl.h"
+
+void watchface_create(lv_obj_t *parent);
 
 // The setters only touch the screen when something visible changed.
 void watchface_set_time(const struct tm *t);

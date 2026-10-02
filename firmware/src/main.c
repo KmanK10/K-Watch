@@ -15,6 +15,7 @@
 #include "ui/music.h"
 #include "ui/notify.h"
 #include "ui/pairing.h"
+#include "ui/screens.h"
 #include "ui/watchface.h"
 
 #define SCREEN_TIMEOUT_MS  6000
@@ -85,7 +86,7 @@ static void screen_off(void)
     }
     display_sleep();
     // The next wake should show the time, not an old notification.
-    watchface_show();
+    ui_show_home(false);
     board_set_touch_wake(TAP_TO_WAKE);
     board_set_screen_awake(false);
     phone_set_interactive(false);
@@ -142,7 +143,7 @@ static void handle_board_event(board_event_t evt)
 static void leave_pairing_screen(void)
 {
     if (pairing_is_showing()) {
-        watchface_show();
+        ui_close_overlay();
         screen_on();
     }
 }
@@ -249,7 +250,7 @@ void app_main(void)
 
     ESP_ERROR_CHECK(board_init(s_board_events));
 
-    watchface_create();
+    ui_init();
     lv_timer_create(refresh_timer_cb, 1000, NULL);
     screen_on();
 

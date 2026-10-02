@@ -1,6 +1,7 @@
 #include "pairing.h"
 
 #include "lvgl.h"
+#include "ui/screens.h"
 
 #define COLOR_ACCENT lv_color_hex(0xFF5F1F)
 
@@ -40,7 +41,7 @@ void pairing_show(uint32_t passkey)
     lv_label_set_text_fmt(s_code, "%03lu %03lu", (unsigned long)(passkey / 1000),
                           (unsigned long)(passkey % 1000));
     lv_obj_align(s_code, LV_ALIGN_CENTER, 0, 0);
-    lv_screen_load(s_screen);
+    ui_show_overlay(s_screen);
 }
 
 bool pairing_is_showing(void)
