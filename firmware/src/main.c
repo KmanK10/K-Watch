@@ -5,23 +5,33 @@
 #include "display.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "imu.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "haptics.h"
+#include "imu.h"
 #include "lvgl.h"
+#include "phone/phone.h"
 #include "pmu.h"
+#include "ui/notify.h"
+#include "ui/pairing.h"
 #include "ui/watchface.h"
 
-#define SCREEN_DIM_MS      4000
 #define SCREEN_TIMEOUT_MS  6000
+#define NOTIFY_TIMEOUT_MS  10000
+#define DIM_BEFORE_OFF_MS  2000
+#define NO_TIMEOUT         UINT32_MAX
 #define TAP_TO_WAKE        true
 #define WRIST_WAKE         true
 
 static const char *TAG = "k-watch";
 
-static QueueHandle_t s_events;
+static QueueHandle_t s_board_events;
+static QueueHandle_t s_phone_events;
+static QueueSetHandle_t s_event_set;
+
 static bool s_screen_on;
 static bool s_dimmed;
+static uint32_t s_timeout_ms = SCREEN_TIMEOUT_MS;
 static int64_t s_screen_on_since_us;
 
 static void refresh_ui(void)
@@ -43,8 +53,10 @@ static void refresh_timer_cb(lv_timer_t *timer)
     refresh_ui();
 }
 
-static void screen_on(void)
+// Turns the screen on (or keeps it on) and sets how long it stays on without a touch.
+static void screen_on_for(uint32_t timeout_ms)
 {
+    s_timeout_ms = timeout_ms;
     if (s_screen_on) {
         display_trigger_activity();
         return;
@@ -59,12 +71,19 @@ static void screen_on(void)
     ESP_LOGI(TAG, "screen on");
 }
 
+static void screen_on(void)
+{
+    screen_on_for(SCREEN_TIMEOUT_MS);
+}
+
 static void screen_off(void)
 {
     if (!s_screen_on) {
         return;
     }
     display_sleep();
+    // The next wake should show the time, not an old notification.
+    watchface_show();
     board_set_touch_wake(TAP_TO_WAKE);
     board_set_screen_awake(false);
     s_screen_on = false;
@@ -102,55 +121,145 @@ static void handle_imu(void)
     }
 }
 
+static void handle_board_event(board_event_t evt)
+{
+    switch (evt) {
+    case BOARD_EVT_PMU:
+        handle_pmu();
+        break;
+    case BOARD_EVT_TOUCH:
+        screen_on();
+        break;
+    case BOARD_EVT_IMU:
+        handle_imu();
+        break;
+    }
+}
+
+static void leave_pairing_screen(void)
+{
+    if (pairing_is_showing()) {
+        watchface_show();
+        screen_on();
+    }
+}
+
+static void handle_phone_event(const phone_event_t *evt)
+{
+    switch (evt->type) {
+    case PHONE_EVT_CONNECTED:
+        ESP_LOGI(TAG, "phone connected");
+        watchface_set_connected(true);
+        break;
+    case PHONE_EVT_DISCONNECTED:
+        ESP_LOGI(TAG, "phone disconnected");
+        watchface_set_connected(false);
+        leave_pairing_screen();
+        break;
+    case PHONE_EVT_PASSKEY:
+        ESP_LOGI(TAG, "pairing code shown");
+        pairing_show(evt->passkey);
+        screen_on_for(NO_TIMEOUT);
+        haptics_play(HAPTIC_TAP);
+        break;
+    case PHONE_EVT_SECURED:
+        ESP_LOGI(TAG, "phone link secured");
+        leave_pairing_screen();
+        break;
+    case PHONE_EVT_PAIRING_FAILED:
+        ESP_LOGW(TAG, "pairing failed");
+        leave_pairing_screen();
+        break;
+    case PHONE_EVT_NOTIFICATION: {
+        const phone_notification_t *n = &evt->notification;
+        if (pairing_is_showing()) {
+            break;
+        }
+        notify_show(n);
+        screen_on_for(NOTIFY_TIMEOUT_MS);
+        haptics_play(n->category == PHONE_CAT_INCOMING_CALL ? HAPTIC_ALERT : HAPTIC_NOTIFY);
+        break;
+    }
+    case PHONE_EVT_NOTIFICATION_REMOVED:
+        // Read or dismissed on the phone: no need to keep showing it here.
+        if (notify_is_showing() && notify_current_uid() == evt->uid) {
+            watchface_show();
+        }
+        break;
+    case PHONE_EVT_TIME: {
+        char buf[32];
+        strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &evt->time);
+        ESP_LOGI(TAG, "time from phone: %s", buf);
+        board_set_time(&evt->time);
+        break;
+    }
+    }
+}
+
 static void update_dimming(uint32_t inactive_ms)
 {
-    bool dim = inactive_ms >= SCREEN_DIM_MS;
+    bool dim = s_timeout_ms != NO_TIMEOUT && inactive_ms + DIM_BEFORE_OFF_MS >= s_timeout_ms;
     if (dim != s_dimmed) {
         s_dimmed = dim;
         display_set_dimmed(dim);
     }
 }
 
+// Runs LVGL and handles the screen timeout. Returns how long the loop may sleep.
+static TickType_t run_screen(void)
+{
+    if (!s_screen_on) {
+        return portMAX_DELAY;
+    }
+    uint32_t next_ms = display_run();
+    if (s_timeout_ms == NO_TIMEOUT) {
+        return pdMS_TO_TICKS(next_ms) > 0 ? pdMS_TO_TICKS(next_ms) : 1;
+    }
+
+    uint32_t inactive = display_inactive_ms();
+    if (inactive >= s_timeout_ms) {
+        screen_off();
+        return portMAX_DELAY;
+    }
+    update_dimming(inactive);
+    uint32_t dim_at = s_timeout_ms - DIM_BEFORE_OFF_MS;
+    uint32_t until_change = inactive < dim_at ? dim_at - inactive : s_timeout_ms - inactive;
+    uint32_t ms = next_ms < until_change ? next_ms : until_change;
+    return pdMS_TO_TICKS(ms) > 0 ? pdMS_TO_TICKS(ms) : 1;
+}
+
 void app_main(void)
 {
-    s_events = xQueueCreate(8, sizeof(board_event_t));
-    ESP_ERROR_CHECK(board_init(s_events));
+    s_board_events = xQueueCreate(8, sizeof(board_event_t));
+    s_phone_events = xQueueCreate(4, sizeof(phone_event_t));
+    s_event_set = xQueueCreateSet(8 + 4);
+    xQueueAddToSet(s_board_events, s_event_set);
+    xQueueAddToSet(s_phone_events, s_event_set);
+
+    ESP_ERROR_CHECK(board_init(s_board_events));
 
     watchface_create();
     lv_timer_create(refresh_timer_cb, 1000, NULL);
     screen_on();
 
+    if (phone_init(s_phone_events) != ESP_OK) {
+        ESP_LOGE(TAG, "running without Bluetooth");
+    }
+
     while (true) {
-        TickType_t wait = portMAX_DELAY;
+        TickType_t wait = run_screen();
+        QueueSetMemberHandle_t ready = xQueueSelectFromSet(s_event_set, wait);
 
-        if (s_screen_on) {
-            uint32_t next_ms = display_run();
-            uint32_t inactive = display_inactive_ms();
-            if (inactive >= SCREEN_TIMEOUT_MS) {
-                screen_off();
-                continue;
+        if (ready == s_board_events) {
+            board_event_t evt;
+            if (xQueueReceive(s_board_events, &evt, 0) == pdTRUE) {
+                handle_board_event(evt);
             }
-            update_dimming(inactive);
-            uint32_t until_change = inactive < SCREEN_DIM_MS ? SCREEN_DIM_MS - inactive
-                                                              : SCREEN_TIMEOUT_MS - inactive;
-            uint32_t ms = next_ms < until_change ? next_ms : until_change;
-            wait = pdMS_TO_TICKS(ms) > 0 ? pdMS_TO_TICKS(ms) : 1;
-        }
-
-        board_event_t evt;
-        if (xQueueReceive(s_events, &evt, wait) != pdTRUE) {
-            continue;
-        }
-        switch (evt) {
-        case BOARD_EVT_PMU:
-            handle_pmu();
-            break;
-        case BOARD_EVT_TOUCH:
-            screen_on();
-            break;
-        case BOARD_EVT_IMU:
-            handle_imu();
-            break;
+        } else if (ready == s_phone_events) {
+            static phone_event_t evt;
+            if (xQueueReceive(s_phone_events, &evt, 0) == pdTRUE) {
+                handle_phone_event(&evt);
+            }
         }
     }
 }

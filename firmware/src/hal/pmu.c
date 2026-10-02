@@ -157,3 +157,8 @@ void pmu_set_backlight_power(bool on)
 {
     i2c_reg_update(s_dev, REG_LDO_ONOFF0, LDO_ALDO2, on ? LDO_ALDO2 : 0);
 }
+
+void pmu_set_haptics_power(bool on)
+{
+    i2c_reg_update(s_dev, REG_LDO_ONOFF0, LDO_BLDO2, on ? LDO_BLDO2 : 0);
+}

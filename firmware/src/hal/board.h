@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <time.h>
 
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
@@ -15,6 +16,9 @@ typedef enum {
 // Brings up every peripheral, sets the system clock from the RTC and
 // configures automatic light sleep. Interrupts are posted to `events`.
 esp_err_t board_init(QueueHandle_t events);
+
+// Sets both the RTC chip and the system clock. Times are local, with no time zone.
+void board_set_time(const struct tm *t);
 
 // Interrupt lines are level-triggered and disarm themselves when they fire.
 void board_rearm(board_event_t evt);

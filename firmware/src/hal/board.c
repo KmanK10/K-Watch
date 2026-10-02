@@ -12,8 +12,10 @@
 #include "esp_sleep.h"
 #include "i2c_bus.h"
 #include "pmu.h"
+#include "haptics.h"
 #include "hwclock.h"
 #include "imu.h"
+#include "nvs_flash.h"
 #include "touch.h"
 
 static const char *TAG = "board";
@@ -129,13 +131,21 @@ esp_err_t board_init(QueueHandle_t events)
 {
     s_events = events;
 
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+
     ESP_ERROR_CHECK(i2c_bus_init());
     ESP_ERROR_CHECK(pmu_init());
     ESP_ERROR_CHECK(hwclock_init());
     ESP_ERROR_CHECK(touch_init());
     ESP_ERROR_CHECK(display_init());
-    // Without the IMU the watch still works, just without wrist wake and steps.
+    // Without these the watch still works, just without wrist wake, steps or vibration.
     s_imu_ok = imu_init() == ESP_OK;
+    haptics_init();
 
     sync_clock_from_rtc();
 
@@ -150,6 +160,14 @@ esp_err_t board_init(QueueHandle_t events)
 
     power_management_init();
     return ESP_OK;
+}
+
+void board_set_time(const struct tm *t)
+{
+    struct tm copy = *t;
+    hwclock_set_time(&copy);
+    struct timeval tv = {.tv_sec = mktime(&copy)};
+    settimeofday(&tv, NULL);
 }
 
 void board_rearm(board_event_t evt)
