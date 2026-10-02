@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="24"
+   height="128"
+   viewBox="0 0 6.3500001 33.866663"
+   version="1.1"
+   id="svg2625"
+   inkscape:version="1.2.2 (b0a8486, 2022-12-01)"
+   inkscape:export-filename="../../assets/temperatureBar.png"
+   inkscape:export-xdpi="92"
+   inkscape:export-ydpi="92"
+   sodipodi:docname="TemperatureBar.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview2627"
+     pagecolor="#4c4c4c"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="px"
+     showgrid="false"
+     inkscape:zoom="1.3906433"
+     inkscape:cx="96.358283"
+     inkscape:cy="91.324641"
+     inkscape:window-width="1309"
+     inkscape:window-height="456"
+     inkscape:window-x="0"
+     inkscape:window-y="25"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs2622">
+    <linearGradient
+       inkscape:collect="always"
+       id="linearGradient2106">
+      <stop
+         style="stop-color:#6aff02;stop-opacity:1;"
+         offset="0"
+         id="stop2096" />
+      <stop
+         style="stop-color:#fbf603;stop-opacity:1;"
+         offset="0.20932794"
+         id="stop2108" />
+      <stop
+         style="stop-color:#fbac04;stop-opacity:1;"
+         offset="0.56801009"
+         id="stop2100" />
+      <stop
+         style="stop-color:#fa2004;stop-opacity:1;"
+         offset="0.92001605"
+         id="stop2102" />
+    </linearGradient>
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient2106"
+       id="linearGradient1367"
+       gradientUnits="userSpaceOnUse"
+       x1="-2.3469102"
+       y1="49.825657"
+       x2="13.267058"
+       y2="19.764629"
+       gradientTransform="translate(-6.1429607,-16.188475)" />
+  </defs>
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <path
+       style="fill:none;fill-opacity:1;stroke:url(#linearGradient1367);stroke-width:1.50495;stroke-linecap:round;stroke-linejoin:miter;stroke-dasharray:none"
+       id="path1260-4"
+       sodipodi:type="arc"
+       sodipodi:cx="28.419111"
+       sodipodi:cy="17.048977"
+       sodipodi:rx="33.836082"
+       sodipodi:ry="32.511494"
+       sodipodi:start="2.6258119"
+       sodipodi:end="3.6572599"
+       sodipodi:open="true"
+       sodipodi:arc-type="arc"
+       d="M -1.0151645,33.084107 A 33.836082,32.511494 0 0 1 -1.0170585,1.0170574"
+       transform="scale(-1,1)" />
+  </g>
+</svg>
