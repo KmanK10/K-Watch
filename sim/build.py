@@ -15,7 +15,8 @@ import subprocess
 import sys
 
 SIM = os.path.dirname(os.path.abspath(__file__))
-FW = os.path.dirname(SIM)
+ROOT = os.path.dirname(SIM)
+FW = os.path.join(ROOT, "firmware")
 LVGL = os.path.join(FW, "managed_components", "lvgl__lvgl")
 BUILD = os.path.join(SIM, "build")
 EXE = os.path.join(BUILD, "k-watch-sim.exe")
@@ -39,7 +40,7 @@ def find_zig():
 
 
 def obj_path(src):
-    rel = os.path.relpath(src, FW).replace(os.sep, "_").replace("..", "up")
+    rel = os.path.relpath(src, ROOT).replace(os.sep, "_").replace("..", "up")
     return os.path.join(BUILD, "obj", rel[:-2] + ".o")
 
 
@@ -87,7 +88,7 @@ def main():
     if result.returncode != 0:
         print(result.stdout + result.stderr)
         sys.exit("Link failed.")
-    print(f"Built {os.path.relpath(EXE, FW)}")
+    print(f"Built {os.path.relpath(EXE, ROOT)}")
 
     if "--build" in sys.argv:
         return
