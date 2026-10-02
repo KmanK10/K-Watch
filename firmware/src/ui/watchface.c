@@ -3,6 +3,8 @@
 #include <stdio.h>
 
 #include "lvgl.h"
+#include "ui/music.h"
+#include "ui/notify.h"
 
 #define COLOR_ACCENT lv_color_hex(0xFF5F1F)
 
@@ -28,10 +30,24 @@ static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t 
     return label;
 }
 
+static void on_swipe_left(lv_event_t *e)
+{
+    (void)e;
+    music_show();
+}
+
+static void on_swipe_up(lv_event_t *e)
+{
+    (void)e;
+    notify_show_list();
+}
+
 void watchface_create(void)
 {
     lv_obj_t *scr = lv_screen_active();
     s_screen = scr;
+    lv_obj_add_event_cb(scr, on_swipe_left, LV_EVENT_GESTURE_LEFT, NULL);
+    lv_obj_add_event_cb(scr, on_swipe_up, LV_EVENT_GESTURE_UP, NULL);
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_set_scrollable(scr, false);

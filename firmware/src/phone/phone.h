@@ -1,8 +1,10 @@
 #pragma once
 
 // iPhone link over Bluetooth LE, using only services built into iOS:
-// ANCS for notifications and CTS for the time. No phone app is required.
+// ANCS for notifications, AMS for media control and CTS for the time.
+// No phone app is required.
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
 
@@ -24,10 +26,21 @@ typedef enum {
 typedef struct {
     uint32_t uid;
     uint8_t category;
-    char app_id[48];    // bundle ID, e.g. com.apple.MobileSMS
+    bool pre_existing;   // already on the phone when the watch connected
+    bool silent;
+    bool has_positive;   // e.g. accept a call
+    bool has_negative;   // e.g. decline a call, or clear the notification
+    char app_id[48];     // bundle ID, e.g. com.apple.MobileSMS
     char title[64];
     char message[192];
 } phone_notification_t;
+
+typedef struct {
+    bool playing;
+    uint8_t volume;      // 0-100
+    char title[64];
+    char artist[48];
+} phone_media_t;
 
 typedef enum {
     PHONE_EVT_CONNECTED,
@@ -38,6 +51,7 @@ typedef enum {
     PHONE_EVT_NOTIFICATION,
     PHONE_EVT_NOTIFICATION_REMOVED,
     PHONE_EVT_TIME,
+    PHONE_EVT_MEDIA,
 } phone_event_type_t;
 
 typedef struct {
@@ -47,9 +61,26 @@ typedef struct {
         uint32_t uid;
         struct tm time;
         phone_notification_t notification;
+        phone_media_t media;
     };
 } phone_event_t;
+
+// AMS remote command IDs
+typedef enum {
+    PHONE_MEDIA_PLAY = 0,
+    PHONE_MEDIA_PAUSE = 1,
+    PHONE_MEDIA_TOGGLE = 2,
+    PHONE_MEDIA_NEXT = 3,
+    PHONE_MEDIA_PREVIOUS = 4,
+    PHONE_MEDIA_VOLUME_UP = 5,
+    PHONE_MEDIA_VOLUME_DOWN = 6,
+} phone_media_cmd_t;
 
 // Starts Bluetooth and advertising. Events are posted to `events` (items are phone_event_t)
 // from the Bluetooth task.
 esp_err_t phone_init(QueueHandle_t events);
+
+// These can be called from any task. They do nothing while the phone is not connected.
+void phone_media_command(phone_media_cmd_t cmd);
+// positive: accept a call. negative: decline a call or clear the notification on the phone.
+void phone_notification_action(uint32_t uid, bool positive);

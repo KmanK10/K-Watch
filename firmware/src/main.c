@@ -12,6 +12,7 @@
 #include "lvgl.h"
 #include "phone/phone.h"
 #include "pmu.h"
+#include "ui/music.h"
 #include "ui/notify.h"
 #include "ui/pairing.h"
 #include "ui/watchface.h"
@@ -150,10 +151,14 @@ static void handle_phone_event(const phone_event_t *evt)
     case PHONE_EVT_CONNECTED:
         ESP_LOGI(TAG, "phone connected");
         watchface_set_connected(true);
+        music_set_connected(true);
+        // The phone re-sends everything in its notification centre after connecting.
+        notify_clear();
         break;
     case PHONE_EVT_DISCONNECTED:
         ESP_LOGI(TAG, "phone disconnected");
         watchface_set_connected(false);
+        music_set_connected(false);
         leave_pairing_screen();
         break;
     case PHONE_EVT_PASSKEY:
@@ -172,19 +177,23 @@ static void handle_phone_event(const phone_event_t *evt)
         break;
     case PHONE_EVT_NOTIFICATION: {
         const phone_notification_t *n = &evt->notification;
-        if (pairing_is_showing()) {
+        notify_add(n);
+        if (n->pre_existing || pairing_is_showing()) {
             break;
         }
-        notify_show(n);
+        notify_show_card(n->uid);
         screen_on_for(NOTIFY_TIMEOUT_MS);
-        haptics_play(n->category == PHONE_CAT_INCOMING_CALL ? HAPTIC_ALERT : HAPTIC_NOTIFY);
+        if (!n->silent) {
+            haptics_play(n->category == PHONE_CAT_INCOMING_CALL ? HAPTIC_ALERT : HAPTIC_NOTIFY);
+        }
         break;
     }
     case PHONE_EVT_NOTIFICATION_REMOVED:
-        // Read or dismissed on the phone: no need to keep showing it here.
-        if (notify_is_showing() && notify_current_uid() == evt->uid) {
-            watchface_show();
-        }
+        // Read or dismissed on the phone, so drop it here too.
+        notify_remove(evt->uid);
+        break;
+    case PHONE_EVT_MEDIA:
+        music_update(&evt->media);
         break;
     case PHONE_EVT_TIME: {
         char buf[32];
@@ -231,8 +240,8 @@ static TickType_t run_screen(void)
 void app_main(void)
 {
     s_board_events = xQueueCreate(8, sizeof(board_event_t));
-    s_phone_events = xQueueCreate(4, sizeof(phone_event_t));
-    s_event_set = xQueueCreateSet(8 + 4);
+    s_phone_events = xQueueCreate(8, sizeof(phone_event_t));
+    s_event_set = xQueueCreateSet(8 + 8);
     xQueueAddToSet(s_board_events, s_event_set);
     xQueueAddToSet(s_phone_events, s_event_set);
 

@@ -16,6 +16,9 @@ CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
 
+# app_main runs LVGL; drawing flex layouts and rounded buttons needs far more than the 3.5KB default.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
 # Bluetooth LE (NimBLE): one iPhone connection, bonded, GATT client for ANCS/CTS.
 # The GATT client needs the central role compiled in; scanning stays off.
 CONFIG_BT_ENABLED=y

@@ -1,11 +1,15 @@
-// NimBLE peripheral that acts as a GATT client to the iPhone's ANCS and CTS.
+// NimBLE peripheral that acts as a GATT client to the iPhone's ANCS, AMS and CTS.
 //
 // After the link is encrypted, setup runs as a chain of GATT operations:
-// find services -> find characteristics -> find CCCDs -> subscribe -> read time.
+// find services -> find characteristics -> find CCCDs -> subscribe -> register.
 // Each step's completion callback starts the next one.
+//
+// After setup, every write to the phone goes through one queue so only one ATT
+// request is ever outstanding.
 
 #include "phone.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -21,7 +25,8 @@ void ble_store_config_init(void);
 
 static const char *TAG = "phone";
 
-// 7905F431-B5CE-4E99-A40F-4B1E122D00D0 and friends, bytes reversed.
+// Apple service UUIDs, bytes reversed.
+// ANCS 7905F431-B5CE-4E99-A40F-4B1E122D00D0
 static const ble_uuid128_t ANCS_SVC = BLE_UUID128_INIT(
     0xD0, 0x00, 0x2D, 0x12, 0x1E, 0x4B, 0x0F, 0xA4, 0x99, 0x4E, 0xCE, 0xB5, 0x31, 0xF4, 0x05, 0x79);
 static const ble_uuid128_t ANCS_NOTIF_SRC = BLE_UUID128_INIT(
@@ -30,24 +35,45 @@ static const ble_uuid128_t ANCS_CTRL_PT = BLE_UUID128_INIT(
     0xD9, 0xD9, 0xAA, 0xFD, 0xBD, 0x9B, 0x21, 0x98, 0xA8, 0x49, 0xE1, 0x45, 0xF3, 0xD8, 0xD1, 0x69);
 static const ble_uuid128_t ANCS_DATA_SRC = BLE_UUID128_INIT(
     0xFB, 0x7B, 0x7C, 0xCE, 0x6A, 0xB3, 0x44, 0xBE, 0xB5, 0x4B, 0xD6, 0x24, 0xE9, 0xC6, 0xEA, 0x22);
+// AMS 89D3502B-0F36-433A-8EF4-C502AD55F8DC
+static const ble_uuid128_t AMS_SVC = BLE_UUID128_INIT(
+    0xDC, 0xF8, 0x55, 0xAD, 0x02, 0xC5, 0xF4, 0x8E, 0x3A, 0x43, 0x36, 0x0F, 0x2B, 0x50, 0xD3, 0x89);
+static const ble_uuid128_t AMS_REMOTE_CMD = BLE_UUID128_INIT(
+    0xC2, 0x51, 0xCA, 0xF7, 0x56, 0x0E, 0xDF, 0xB8, 0x8A, 0x4A, 0xB1, 0x57, 0xD8, 0x81, 0x3C, 0x9B);
+static const ble_uuid128_t AMS_ENTITY_UPDATE = BLE_UUID128_INIT(
+    0x02, 0xC1, 0x96, 0xBA, 0x92, 0xBB, 0x0C, 0x9A, 0x1F, 0x41, 0x8D, 0x80, 0xCE, 0xAB, 0x7C, 0x2F);
 static const ble_uuid16_t CTS_SVC = BLE_UUID16_INIT(0x1805);
 static const ble_uuid16_t CTS_CURRENT_TIME = BLE_UUID16_INIT(0x2A2B);
 static const ble_uuid16_t CCCD = BLE_UUID16_INIT(BLE_GATT_DSC_CLT_CFG_UUID16);
 
 // ANCS protocol values
-#define EVT_ADDED            0
-#define EVT_REMOVED          2
-#define FLAG_PRE_EXISTING    (1 << 2)
-#define CMD_GET_NOTIF_ATTRS  0
-#define ATTR_APP_ID          0
-#define ATTR_TITLE           1
-#define ATTR_MESSAGE         3
-#define ATTR_COUNT           3
+#define EVT_ADDED              0
+#define EVT_REMOVED            2
+#define FLAG_SILENT            (1 << 0)
+#define FLAG_PRE_EXISTING      (1 << 2)
+#define FLAG_POSITIVE_ACTION   (1 << 3)
+#define FLAG_NEGATIVE_ACTION   (1 << 4)
+#define CMD_GET_NOTIF_ATTRS    0
+#define CMD_PERFORM_ACTION     2
+#define ATTR_APP_ID            0
+#define ATTR_TITLE             1
+#define ATTR_MESSAGE           3
+#define ATTR_COUNT             3
 
-#define ADV_FAST_MS          30000
-#define MAX_CHRS             8
-#define PENDING_MAX          8
-#define DATA_BUF_SIZE        512
+// AMS protocol values
+#define ENTITY_PLAYER          0
+#define ENTITY_TRACK           2
+#define PLAYER_PLAYBACK_INFO   1
+#define PLAYER_VOLUME          2
+#define TRACK_ARTIST           0
+#define TRACK_TITLE            2
+
+#define ADV_FAST_MS            30000
+#define MAX_CHRS               8
+#define PENDING_MAX            16
+#define DATA_BUF_SIZE          512
+#define WRITE_QUEUE_LEN        8
+#define CMD_QUEUE_LEN          8
 
 typedef enum {
     STEP_ANCS_SVC,
@@ -60,10 +86,20 @@ typedef enum {
     STEP_CTS_DSCS,
     STEP_SUB_TIME,
     STEP_READ_TIME,
+    STEP_AMS_SVC,
+    STEP_AMS_CHRS,
+    STEP_AMS_DSCS,
+    STEP_SUB_REMOTE_CMD,
+    STEP_SUB_ENTITY,
+    STEP_REGISTER_PLAYER,
+    STEP_REGISTER_TRACK,
     STEP_DONE,
 } setup_step_t;
 
 typedef struct {
+    setup_step_t after_svc;
+    setup_step_t after_chrs;
+    setup_step_t after_dscs;
     uint16_t start;
     uint16_t end;
     uint16_t chr_vals[MAX_CHRS];   // every characteristic, to tell which one owns a CCCD
@@ -73,23 +109,51 @@ typedef struct {
 typedef struct {
     uint32_t uid;
     uint8_t category;
+    uint8_t flags;
 } pending_t;
 
+typedef struct {
+    uint16_t handle;
+    uint8_t len;
+    uint8_t data[16];
+    bool is_ancs_request;
+} write_op_t;
+
+typedef enum { CMD_MEDIA, CMD_NOTIF_ACTION } cmd_kind_t;
+
+typedef struct {
+    cmd_kind_t kind;
+    uint8_t arg;
+    uint32_t uid;
+} phone_cmd_t;
+
 static QueueHandle_t s_events;
+static QueueHandle_t s_cmds;
+static struct ble_npl_event s_cmd_event;
 static uint8_t s_own_addr_type;
 static uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
+static bool s_setup_done;
+static bool s_slow_link;
 
-static service_t s_ancs, s_cts;
+static service_t s_ancs, s_cts, s_ams;
 static uint16_t s_notif_src, s_notif_src_cccd;
 static uint16_t s_ctrl_pt;
 static uint16_t s_data_src, s_data_src_cccd;
 static uint16_t s_time, s_time_cccd;
+static uint16_t s_remote_cmd, s_remote_cmd_cccd;
+static uint16_t s_entity, s_entity_cccd;
 
 static pending_t s_pending[PENDING_MAX];
 static int s_pending_count;
 static bool s_request_active;
 static uint8_t s_data[DATA_BUF_SIZE];
 static size_t s_data_len;
+
+static write_op_t s_writes[WRITE_QUEUE_LEN];
+static int s_write_count;
+static bool s_write_busy;
+
+static phone_media_t s_media;
 
 static void run_step(setup_step_t step);
 static void advertise(bool fast);
@@ -107,15 +171,86 @@ static void post_simple(phone_event_type_t type)
     post(&evt);
 }
 
+static void reset_service(service_t *s, setup_step_t after_svc, setup_step_t after_chrs,
+                          setup_step_t after_dscs)
+{
+    memset(s, 0, sizeof(*s));
+    s->after_svc = after_svc;
+    s->after_chrs = after_chrs;
+    s->after_dscs = after_dscs;
+}
+
 static void reset_link_state(void)
 {
-    memset(&s_ancs, 0, sizeof(s_ancs));
-    memset(&s_cts, 0, sizeof(s_cts));
+    reset_service(&s_ancs, STEP_ANCS_CHRS, STEP_ANCS_DSCS, STEP_SUB_DATA_SRC);
+    reset_service(&s_cts, STEP_CTS_CHRS, STEP_CTS_DSCS, STEP_SUB_TIME);
+    reset_service(&s_ams, STEP_AMS_CHRS, STEP_AMS_DSCS, STEP_SUB_REMOTE_CMD);
     s_notif_src = s_notif_src_cccd = s_ctrl_pt = 0;
     s_data_src = s_data_src_cccd = s_time = s_time_cccd = 0;
+    s_remote_cmd = s_remote_cmd_cccd = s_entity = s_entity_cccd = 0;
+    s_setup_done = false;
+    s_slow_link = false;
     s_pending_count = 0;
     s_request_active = false;
     s_data_len = 0;
+    s_write_count = 0;
+    s_write_busy = false;
+    memset(&s_media, 0, sizeof(s_media));
+}
+
+// ---- Write queue (used once setup is done) ----
+
+static void finish_request(void);
+
+static void write_pump(void);
+
+static int on_queued_write(uint16_t conn, const struct ble_gatt_error *err,
+                           struct ble_gatt_attr *attr, void *arg)
+{
+    (void)conn;
+    (void)attr;
+    (void)arg;
+    bool was_ancs_request = s_writes[0].is_ancs_request;
+    if (err->status != 0) {
+        ESP_LOGW(TAG, "write to 0x%04x failed: %d", s_writes[0].handle, err->status);
+    }
+    memmove(&s_writes[0], &s_writes[1], (s_write_count - 1) * sizeof(s_writes[0]));
+    s_write_count--;
+    s_write_busy = false;
+
+    // A failed details request usually means the notification is already gone.
+    if (was_ancs_request && err->status != 0) {
+        finish_request();
+    }
+    write_pump();
+    return 0;
+}
+
+static void write_pump(void)
+{
+    if (s_write_busy || s_write_count == 0 || s_conn == BLE_HS_CONN_HANDLE_NONE) {
+        return;
+    }
+    s_write_busy = true;
+    const write_op_t *w = &s_writes[0];
+    if (ble_gattc_write_flat(s_conn, w->handle, w->data, w->len, on_queued_write, NULL) != 0) {
+        struct ble_gatt_error err = {.status = BLE_HS_EUNKNOWN};
+        on_queued_write(s_conn, &err, NULL, NULL);
+    }
+}
+
+static bool write_enqueue(uint16_t handle, const uint8_t *data, uint8_t len, bool is_ancs_request)
+{
+    if (!handle || s_write_count >= WRITE_QUEUE_LEN || len > sizeof(s_writes[0].data)) {
+        return false;
+    }
+    write_op_t *w = &s_writes[s_write_count++];
+    w->handle = handle;
+    w->len = len;
+    w->is_ancs_request = is_ancs_request;
+    memcpy(w->data, data, len);
+    write_pump();
+    return true;
 }
 
 // ---- Notification details (ANCS Control Point -> Data Source) ----
@@ -133,23 +268,19 @@ static void finish_request(void)
     request_next_notification();
 }
 
-static int on_ctrl_pt_written(uint16_t conn, const struct ble_gatt_error *err,
-                              struct ble_gatt_attr *attr, void *arg)
-{
-    (void)conn;
-    (void)attr;
-    (void)arg;
-    if (err->status != 0) {
-        // Usually the notification was removed before we asked for it.
-        ESP_LOGW(TAG, "ANCS request failed: %d", err->status);
-        finish_request();
-    }
-    return 0;
-}
+static void request_power_saving_params(void);
 
 static void request_next_notification(void)
 {
-    if (s_request_active || s_pending_count == 0 || !s_ctrl_pt) {
+    if (!s_setup_done || s_request_active) {
+        return;
+    }
+    if (s_pending_count == 0) {
+        // Stay on the fast connection until the backlog is fetched, then slow down.
+        if (!s_slow_link) {
+            s_slow_link = true;
+            request_power_saving_params();
+        }
         return;
     }
     uint32_t uid = s_pending[0].uid;
@@ -162,7 +293,7 @@ static void request_next_notification(void)
     };
     s_request_active = true;
     s_data_len = 0;
-    if (ble_gattc_write_flat(s_conn, s_ctrl_pt, cmd, sizeof(cmd), on_ctrl_pt_written, NULL) != 0) {
+    if (!write_enqueue(s_ctrl_pt, cmd, sizeof(cmd), true)) {
         finish_request();
     }
 }
@@ -220,10 +351,16 @@ static void on_data_source(const uint8_t *data, size_t len)
     s_data_len += len;
 
     phone_event_t evt = {.type = PHONE_EVT_NOTIFICATION};
-    if (parse_data_source(&evt.notification)) {
-        evt.notification.category = s_pending[0].category;
-        ESP_LOGI(TAG, "notification %lu from %s", (unsigned long)evt.notification.uid,
-                 evt.notification.app_id);
+    phone_notification_t *n = &evt.notification;
+    if (parse_data_source(n)) {
+        const pending_t *p = &s_pending[0];
+        n->category = p->category;
+        n->pre_existing = p->flags & FLAG_PRE_EXISTING;
+        n->silent = p->flags & FLAG_SILENT;
+        n->has_positive = p->flags & FLAG_POSITIVE_ACTION;
+        n->has_negative = p->flags & FLAG_NEGATIVE_ACTION;
+        ESP_LOGI(TAG, "notification %lu from %s%s", (unsigned long)n->uid, n->app_id,
+                 n->pre_existing ? " (already on phone)" : "");
         post(&evt);
         finish_request();
     }
@@ -239,15 +376,48 @@ static void on_notification_source(const uint8_t *data, size_t len)
     uint8_t category = data[2];
     uint32_t uid = data[4] | (data[5] << 8) | (data[6] << 16) | ((uint32_t)data[7] << 24);
 
-    if (event_id == EVT_ADDED && !(flags & FLAG_PRE_EXISTING)) {
-        if (s_pending_count < PENDING_MAX) {
-            s_pending[s_pending_count++] = (pending_t){.uid = uid, .category = category};
-            request_next_notification();
+    if (event_id == EVT_ADDED) {
+        // When full, forget the oldest one that is not already being fetched.
+        if (s_pending_count == PENDING_MAX) {
+            int drop = s_request_active ? 1 : 0;
+            memmove(&s_pending[drop], &s_pending[drop + 1],
+                    (PENDING_MAX - drop - 1) * sizeof(s_pending[0]));
+            s_pending_count--;
         }
+        s_pending[s_pending_count++] = (pending_t){.uid = uid, .category = category, .flags = flags};
+        request_next_notification();
     } else if (event_id == EVT_REMOVED) {
         phone_event_t evt = {.type = PHONE_EVT_NOTIFICATION_REMOVED, .uid = uid};
         post(&evt);
     }
+}
+
+// ---- Media (AMS Entity Update) ----
+
+static void on_entity_update(const uint8_t *data, size_t len)
+{
+    if (len < 3) {
+        return;
+    }
+    uint8_t entity = data[0];
+    uint8_t attr = data[1];
+    char value[64];
+    copy_attr(value, sizeof(value), &data[3], len - 3);
+
+    if (entity == ENTITY_PLAYER && attr == PLAYER_PLAYBACK_INFO) {
+        // "state,rate,elapsed": state 0 is paused, 1 playing, 2/3 seeking.
+        s_media.playing = value[0] == '1' || value[0] == '2' || value[0] == '3';
+    } else if (entity == ENTITY_PLAYER && attr == PLAYER_VOLUME) {
+        s_media.volume = (uint8_t)(strtof(value, NULL) * 100 + 0.5f);
+    } else if (entity == ENTITY_TRACK && attr == TRACK_TITLE) {
+        copy_attr(s_media.title, sizeof(s_media.title), &data[3], len - 3);
+    } else if (entity == ENTITY_TRACK && attr == TRACK_ARTIST) {
+        copy_attr(s_media.artist, sizeof(s_media.artist), &data[3], len - 3);
+    } else {
+        return;
+    }
+    phone_event_t evt = {.type = PHONE_EVT_MEDIA, .media = s_media};
+    post(&evt);
 }
 
 // ---- Time (CTS Current Time) ----
@@ -280,7 +450,7 @@ static int on_time_read(uint16_t conn, const struct ble_gatt_error *err,
             on_time_value(buf, len);
         }
     }
-    run_step(STEP_DONE);
+    run_step(STEP_AMS_SVC);
     return 0;
 }
 
@@ -296,8 +466,32 @@ static int on_svc(uint16_t conn, const struct ble_gatt_error *err,
         s->end = svc->end_handle;
         return 0;
     }
-    run_step(s == &s_ancs ? STEP_ANCS_CHRS : STEP_CTS_CHRS);
+    run_step(s->after_svc);
     return 0;
+}
+
+static void match_chr(const service_t *s, const struct ble_gatt_chr *chr)
+{
+    const ble_uuid_t *u = &chr->uuid.u;
+    if (s == &s_ancs) {
+        if (ble_uuid_cmp(u, &ANCS_NOTIF_SRC.u) == 0) {
+            s_notif_src = chr->val_handle;
+        } else if (ble_uuid_cmp(u, &ANCS_CTRL_PT.u) == 0) {
+            s_ctrl_pt = chr->val_handle;
+        } else if (ble_uuid_cmp(u, &ANCS_DATA_SRC.u) == 0) {
+            s_data_src = chr->val_handle;
+        }
+    } else if (s == &s_cts) {
+        if (ble_uuid_cmp(u, &CTS_CURRENT_TIME.u) == 0) {
+            s_time = chr->val_handle;
+        }
+    } else if (s == &s_ams) {
+        if (ble_uuid_cmp(u, &AMS_REMOTE_CMD.u) == 0) {
+            s_remote_cmd = chr->val_handle;
+        } else if (ble_uuid_cmp(u, &AMS_ENTITY_UPDATE.u) == 0) {
+            s_entity = chr->val_handle;
+        }
+    }
 }
 
 static int on_chr(uint16_t conn, const struct ble_gatt_error *err,
@@ -309,20 +503,10 @@ static int on_chr(uint16_t conn, const struct ble_gatt_error *err,
         if (s->chr_count < MAX_CHRS) {
             s->chr_vals[s->chr_count++] = chr->val_handle;
         }
-        if (s == &s_ancs) {
-            if (ble_uuid_cmp(&chr->uuid.u, &ANCS_NOTIF_SRC.u) == 0) {
-                s_notif_src = chr->val_handle;
-            } else if (ble_uuid_cmp(&chr->uuid.u, &ANCS_CTRL_PT.u) == 0) {
-                s_ctrl_pt = chr->val_handle;
-            } else if (ble_uuid_cmp(&chr->uuid.u, &ANCS_DATA_SRC.u) == 0) {
-                s_data_src = chr->val_handle;
-            }
-        } else if (ble_uuid_cmp(&chr->uuid.u, &CTS_CURRENT_TIME.u) == 0) {
-            s_time = chr->val_handle;
-        }
+        match_chr(s, chr);
         return 0;
     }
-    run_step(s == &s_ancs ? STEP_ANCS_DSCS : STEP_CTS_DSCS);
+    run_step(s->after_chrs);
     return 0;
 }
 
@@ -347,37 +531,71 @@ static int on_dsc(uint16_t conn, const struct ble_gatt_error *err, uint16_t chr_
     if (err->status == 0) {
         if (ble_uuid_cmp(&dsc->uuid.u, &CCCD.u) == 0) {
             uint16_t owner = owning_chr(s, dsc->handle);
-            if (owner && owner == s_notif_src) {
-                s_notif_src_cccd = dsc->handle;
-            } else if (owner && owner == s_data_src) {
-                s_data_src_cccd = dsc->handle;
-            } else if (owner && owner == s_time) {
-                s_time_cccd = dsc->handle;
+            uint16_t *const pairs[][2] = {
+                {&s_notif_src, &s_notif_src_cccd},
+                {&s_data_src, &s_data_src_cccd},
+                {&s_time, &s_time_cccd},
+                {&s_remote_cmd, &s_remote_cmd_cccd},
+                {&s_entity, &s_entity_cccd},
+            };
+            for (size_t i = 0; owner && i < sizeof(pairs) / sizeof(pairs[0]); i++) {
+                if (*pairs[i][0] == owner) {
+                    *pairs[i][1] = dsc->handle;
+                }
             }
         }
         return 0;
     }
-    run_step(s == &s_ancs ? STEP_SUB_DATA_SRC : STEP_SUB_TIME);
+    run_step(s->after_dscs);
     return 0;
 }
 
-static int on_subscribed(uint16_t conn, const struct ble_gatt_error *err,
-                         struct ble_gatt_attr *attr, void *arg)
+static int on_setup_write(uint16_t conn, const struct ble_gatt_error *err,
+                          struct ble_gatt_attr *attr, void *arg)
 {
     (void)conn;
     (void)attr;
     if (err->status != 0) {
-        ESP_LOGW(TAG, "subscribe failed: %d", err->status);
+        ESP_LOGW(TAG, "setup write failed: %d", err->status);
     }
     run_step((setup_step_t)(uintptr_t)arg);
     return 0;
 }
 
-static bool subscribe(uint16_t cccd, setup_step_t next)
+// Starts a write that continues with `next`. If it cannot start, continues right away.
+static void setup_write(uint16_t handle, const uint8_t *data, uint16_t len, setup_step_t next)
+{
+    if (!handle || ble_gattc_write_flat(s_conn, handle, data, len, on_setup_write,
+                                        (void *)(uintptr_t)next) != 0) {
+        run_step(next);
+    }
+}
+
+static void subscribe(uint16_t cccd, setup_step_t next)
 {
     static const uint8_t enable[2] = {0x01, 0x00};
-    return cccd && ble_gattc_write_flat(s_conn, cccd, enable, sizeof(enable), on_subscribed,
-                                        (void *)(uintptr_t)next) == 0;
+    setup_write(cccd, enable, sizeof(enable), next);
+}
+
+static void discover_service(service_t *s, const ble_uuid_t *uuid)
+{
+    if (ble_gattc_disc_svc_by_uuid(s_conn, uuid, on_svc, s) != 0) {
+        run_step(s->after_svc);
+    }
+}
+
+static void discover_chrs(service_t *s, setup_step_t skip_to)
+{
+    if (!s->start || ble_gattc_disc_all_chrs(s_conn, s->start, s->end, on_chr, s) != 0) {
+        run_step(skip_to);
+    }
+}
+
+static void discover_dscs(service_t *s)
+{
+    if (ble_gattc_disc_all_dscs(s_conn, s->start, s->end, on_dsc, s) != 0) {
+        run_step(s->after_dscs);
+    }
 }
 
 static void request_power_saving_params(void)
@@ -397,67 +615,117 @@ static void run_step(setup_step_t step)
     if (s_conn == BLE_HS_CONN_HANDLE_NONE) {
         return;
     }
-    int rc = 0;
     switch (step) {
     case STEP_ANCS_SVC:
-        rc = ble_gattc_disc_svc_by_uuid(s_conn, &ANCS_SVC.u, on_svc, &s_ancs);
+        discover_service(&s_ancs, &ANCS_SVC.u);
         break;
     case STEP_ANCS_CHRS:
-        if (!s_ancs.start) {
-            ESP_LOGW(TAG, "iPhone did not offer notifications (ANCS)");
-            run_step(STEP_CTS_SVC);
-            return;
-        }
-        rc = ble_gattc_disc_all_chrs(s_conn, s_ancs.start, s_ancs.end, on_chr, &s_ancs);
+        discover_chrs(&s_ancs, STEP_CTS_SVC);
         break;
     case STEP_ANCS_DSCS:
-        rc = ble_gattc_disc_all_dscs(s_conn, s_ancs.start, s_ancs.end, on_dsc, &s_ancs);
+        discover_dscs(&s_ancs);
         break;
     case STEP_SUB_DATA_SRC:
         // Apple asks for Data Source to be subscribed before Notification Source.
-        if (!subscribe(s_data_src_cccd, STEP_SUB_NOTIF_SRC)) {
-            run_step(STEP_SUB_NOTIF_SRC);
-        }
-        return;
+        subscribe(s_data_src_cccd, STEP_SUB_NOTIF_SRC);
+        break;
     case STEP_SUB_NOTIF_SRC:
-        if (!subscribe(s_notif_src_cccd, STEP_CTS_SVC)) {
-            run_step(STEP_CTS_SVC);
-        }
-        return;
+        subscribe(s_notif_src_cccd, STEP_CTS_SVC);
+        break;
     case STEP_CTS_SVC:
-        rc = ble_gattc_disc_svc_by_uuid(s_conn, &CTS_SVC.u, on_svc, &s_cts);
+        discover_service(&s_cts, &CTS_SVC.u);
         break;
     case STEP_CTS_CHRS:
-        if (!s_cts.start) {
-            run_step(STEP_DONE);
-            return;
-        }
-        rc = ble_gattc_disc_all_chrs(s_conn, s_cts.start, s_cts.end, on_chr, &s_cts);
+        discover_chrs(&s_cts, STEP_AMS_SVC);
         break;
     case STEP_CTS_DSCS:
-        rc = ble_gattc_disc_all_dscs(s_conn, s_cts.start, s_cts.end, on_dsc, &s_cts);
+        discover_dscs(&s_cts);
         break;
     case STEP_SUB_TIME:
-        if (!subscribe(s_time_cccd, STEP_READ_TIME)) {
-            run_step(STEP_READ_TIME);
-        }
-        return;
-    case STEP_READ_TIME:
-        if (!s_time) {
-            run_step(STEP_DONE);
-            return;
-        }
-        rc = ble_gattc_read(s_conn, s_time, on_time_read, NULL);
+        subscribe(s_time_cccd, STEP_READ_TIME);
         break;
+    case STEP_READ_TIME:
+        if (!s_time || ble_gattc_read(s_conn, s_time, on_time_read, NULL) != 0) {
+            run_step(STEP_AMS_SVC);
+        }
+        break;
+    case STEP_AMS_SVC:
+        discover_service(&s_ams, &AMS_SVC.u);
+        break;
+    case STEP_AMS_CHRS:
+        discover_chrs(&s_ams, STEP_DONE);
+        break;
+    case STEP_AMS_DSCS:
+        discover_dscs(&s_ams);
+        break;
+    case STEP_SUB_REMOTE_CMD:
+        subscribe(s_remote_cmd_cccd, STEP_SUB_ENTITY);
+        break;
+    case STEP_SUB_ENTITY:
+        subscribe(s_entity_cccd, STEP_REGISTER_PLAYER);
+        break;
+    case STEP_REGISTER_PLAYER: {
+        static const uint8_t reg[] = {ENTITY_PLAYER, PLAYER_PLAYBACK_INFO, PLAYER_VOLUME};
+        setup_write(s_entity_cccd ? s_entity : 0, reg, sizeof(reg), STEP_REGISTER_TRACK);
+        break;
+    }
+    case STEP_REGISTER_TRACK: {
+        static const uint8_t reg[] = {ENTITY_TRACK, TRACK_ARTIST, TRACK_TITLE};
+        setup_write(s_entity_cccd ? s_entity : 0, reg, sizeof(reg), STEP_DONE);
+        break;
+    }
     case STEP_DONE:
-        ESP_LOGI(TAG, "setup done: notifications %s, time %s",
-                 s_notif_src_cccd ? "yes" : "no", s_time ? "yes" : "no");
-        request_power_saving_params();
+        ESP_LOGI(TAG, "setup done: notifications %s, time %s, media %s",
+                 s_notif_src_cccd ? "yes" : "no", s_time ? "yes" : "no",
+                 s_entity_cccd ? "yes" : "no");
+        s_setup_done = true;
+        request_next_notification();
+        break;
+    }
+}
+
+// ---- Commands from other tasks ----
+
+static void on_cmd_event(struct ble_npl_event *ev)
+{
+    (void)ev;
+    phone_cmd_t cmd;
+    while (xQueueReceive(s_cmds, &cmd, 0) == pdTRUE) {
+        if (!s_setup_done) {
+            continue;
+        }
+        if (cmd.kind == CMD_MEDIA) {
+            write_enqueue(s_remote_cmd, &cmd.arg, 1, false);
+        } else {
+            const uint8_t data[] = {
+                CMD_PERFORM_ACTION,
+                cmd.uid & 0xFF, (cmd.uid >> 8) & 0xFF, (cmd.uid >> 16) & 0xFF, cmd.uid >> 24,
+                cmd.arg,
+            };
+            write_enqueue(s_ctrl_pt, data, sizeof(data), false);
+        }
+    }
+}
+
+static void send_cmd(const phone_cmd_t *cmd)
+{
+    if (!s_cmds || xQueueSend(s_cmds, cmd, 0) != pdTRUE) {
         return;
     }
-    if (rc != 0) {
-        ESP_LOGW(TAG, "setup step %d failed: %d", step, rc);
-    }
+    ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &s_cmd_event);
+}
+
+void phone_media_command(phone_media_cmd_t cmd)
+{
+    phone_cmd_t c = {.kind = CMD_MEDIA, .arg = (uint8_t)cmd};
+    send_cmd(&c);
+}
+
+void phone_notification_action(uint32_t uid, bool positive)
+{
+    // ANCS action IDs: 0 positive, 1 negative.
+    phone_cmd_t c = {.kind = CMD_NOTIF_ACTION, .arg = positive ? 0 : 1, .uid = uid};
+    send_cmd(&c);
 }
 
 // ---- GAP ----
@@ -530,6 +798,8 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
             on_notification_source(buf, len);
         } else if (h == s_data_src) {
             on_data_source(buf, len);
+        } else if (h == s_entity) {
+            on_entity_update(buf, len);
         } else if (h == s_time) {
             on_time_value(buf, len);
         }
@@ -609,12 +879,14 @@ static void host_task(void *param)
 esp_err_t phone_init(QueueHandle_t events)
 {
     s_events = events;
+    s_cmds = xQueueCreate(CMD_QUEUE_LEN, sizeof(phone_cmd_t));
 
     esp_err_t err = nimble_port_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Bluetooth init failed: %s", esp_err_to_name(err));
         return err;
     }
+    ble_npl_event_init(&s_cmd_event, on_cmd_event, NULL);
 
     ble_hs_cfg.sync_cb = on_sync;
     ble_hs_cfg.reset_cb = on_reset;
