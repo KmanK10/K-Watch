@@ -23,6 +23,16 @@ void phone_notification_action(uint32_t uid, bool positive)
     notify_remove(uid);
 }
 
+void phone_forget(void)
+{
+    printf("[phone] pairing deleted, disconnecting\n");
+}
+
+void phone_set_enabled(bool enabled)
+{
+    printf("[phone] Bluetooth %s\n", enabled ? "on" : "off");
+}
+
 void haptics_play(haptic_pattern_t pattern)
 {
     static const char *const NAMES[] = {"tap", "notify", "alert"};

@@ -10,12 +10,14 @@ static lv_obj_t *s_time;
 static lv_obj_t *s_date;
 static lv_obj_t *s_power;
 static lv_obj_t *s_steps;
+static lv_obj_t *s_dnd;
 
 static int s_last_minute = -1;
 static int s_last_day = -1;
 static int s_last_percent = -2;
 static int s_last_flags = -1;
 static uint32_t s_last_steps = UINT32_MAX;
+static bool s_24h;
 
 void watchface_create(lv_obj_t *parent)
 {
@@ -35,11 +37,29 @@ void watchface_create(lv_obj_t *parent)
     lv_label_set_text(s_bluetooth, LV_SYMBOL_BLUETOOTH);
     lv_obj_align(s_bluetooth, LV_ALIGN_TOP_LEFT, 10, 6);
     lv_obj_set_hidden(s_bluetooth, true);
+
+    s_dnd = ui_label(parent, &lv_font_montserrat_14, lv_color_hex(0x9C8CFF));
+    lv_label_set_text(s_dnd, "DND");
+    lv_obj_align(s_dnd, LV_ALIGN_TOP_MID, 0, 7);
+    lv_obj_set_hidden(s_dnd, true);
+}
+
+void watchface_set_dnd(bool on)
+{
+    lv_obj_set_hidden(s_dnd, !on);
 }
 
 void watchface_set_connected(bool connected)
 {
     lv_obj_set_hidden(s_bluetooth, !connected);
+}
+
+void watchface_set_24h(bool on)
+{
+    if (on != s_24h) {
+        s_24h = on;
+        s_last_minute = -1;   // redraw on the next watchface_set_time
+    }
 }
 
 void watchface_set_steps(uint32_t steps)
@@ -57,8 +77,12 @@ void watchface_set_time(const struct tm *t)
 
     if (t->tm_min != s_last_minute) {
         s_last_minute = t->tm_min;
-        int hour12 = t->tm_hour % 12 == 0 ? 12 : t->tm_hour % 12;
-        snprintf(buf, sizeof(buf), "%d:%02d", hour12, t->tm_min);
+        if (s_24h) {
+            snprintf(buf, sizeof(buf), "%02d:%02d", t->tm_hour, t->tm_min);
+        } else {
+            int hour12 = t->tm_hour % 12 == 0 ? 12 : t->tm_hour % 12;
+            snprintf(buf, sizeof(buf), "%d:%02d", hour12, t->tm_min);
+        }
         lv_label_set_text(s_time, buf);
     }
 

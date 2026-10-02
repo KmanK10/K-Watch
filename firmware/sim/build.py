@@ -57,6 +57,7 @@ def main():
 
     lvgl_sources = glob.glob(os.path.join(LVGL, "src", "**", "*.c"), recursive=True)
     our_sources = (glob.glob(os.path.join(FW, "src", "ui", "*.c")) +
+                   [os.path.join(FW, "src", "settings.c")] +
                    glob.glob(os.path.join(SIM, "*.c")))
 
     conf_time = os.path.getmtime(os.path.join(SIM, "lv_conf.h"))

@@ -35,6 +35,7 @@ static esp_lcd_panel_handle_t s_panel;
 static lv_display_t *s_disp;
 static esp_pm_lock_handle_t s_render_lock;
 static uint8_t s_brightness = 60;
+static bool s_asleep;   // the backlight stays off until display_wake
 
 static bool on_flush_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *edata, void *ctx)
 {
@@ -167,6 +168,7 @@ esp_err_t display_init(void)
 
 void display_sleep(void)
 {
+    s_asleep = true;
     backlight_set_duty(0);
     pmu_set_backlight_power(false);
     esp_lcd_panel_disp_on_off(s_panel, false);
@@ -188,6 +190,7 @@ void display_wake(void)
 
     esp_lcd_panel_disp_on_off(s_panel, true);
     pmu_set_backlight_power(true);
+    s_asleep = false;
     backlight_set_duty(s_brightness);
     lv_display_trigger_activity(s_disp);
 }
@@ -195,11 +198,16 @@ void display_wake(void)
 void display_set_brightness(uint8_t percent)
 {
     s_brightness = percent > 100 ? 100 : percent;
-    backlight_set_duty(s_brightness);
+    if (!s_asleep) {
+        backlight_set_duty(s_brightness);
+    }
 }
 
 void display_set_dimmed(bool dimmed)
 {
+    if (s_asleep) {
+        return;
+    }
     uint8_t low = s_brightness / 3;
     backlight_set_duty(dimmed ? (low < DIM_MIN_PERCENT ? DIM_MIN_PERCENT : low) : s_brightness);
 }

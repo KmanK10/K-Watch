@@ -171,11 +171,11 @@ static void on_item_clicked(lv_event_t *e)
 }
 
 static lv_obj_t *item_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t color,
-                            const char *text)
+                            const char *text, int max_lines)
 {
     lv_obj_t *label = ui_label(parent, font, color);
     lv_obj_set_width(label, lv_pct(100));
-    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+    ui_label_max_lines(label, max_lines);
     set_ascii_text(label, text);
     return label;
 }
@@ -207,13 +207,13 @@ static void rebuild_list(void)
         lv_obj_set_gesture_bubble(item, true);
         lv_obj_add_event_cb(item, on_item_clicked, LV_EVENT_SHORT_CLICKED, (void *)(uintptr_t)n->uid);
 
-        item_label(item, &lv_font_montserrat_16, UI_COLOR_ACCENT, app_display_name(n));
+        item_label(item, &lv_font_montserrat_16, UI_COLOR_ACCENT, app_display_name(n), 1);
         const char *heading = title_is_useful(n) ? n->title : n->subtitle;
         if (heading[0]) {
-            item_label(item, &lv_font_montserrat_16, lv_color_white(), heading);
+            item_label(item, &lv_font_montserrat_16, lv_color_white(), heading, 1);
         }
         if (n->message[0]) {
-            item_label(item, &lv_font_montserrat_16, UI_COLOR_DIM, n->message);
+            item_label(item, &lv_font_montserrat_16, UI_COLOR_DIM, n->message, 2);
         }
     }
 }

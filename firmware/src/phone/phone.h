@@ -87,5 +87,13 @@ void phone_media_command(phone_media_cmd_t cmd);
 // positive: accept a call. negative: decline a call or clear the notification on the phone.
 void phone_notification_action(uint32_t uid, bool positive);
 
+// Deletes the stored pairing and disconnects, so a phone can pair from scratch.
+// The phone also has to forget the watch in its Bluetooth settings.
+void phone_forget(void);
+
+// Off disconnects and stops advertising, so the phone can't reconnect until it's back on.
+// Can be called before phone_init.
+void phone_set_enabled(bool enabled);
+
 // A fast connection while the user is interacting, a slow one otherwise.
 void phone_set_interactive(bool interactive);

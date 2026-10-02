@@ -130,7 +130,7 @@ typedef struct {
     char name[32];
 } app_name_t;
 
-typedef enum { CMD_MEDIA, CMD_NOTIF_ACTION, CMD_LINK_SPEED } cmd_kind_t;
+typedef enum { CMD_MEDIA, CMD_NOTIF_ACTION, CMD_LINK_SPEED, CMD_FORGET, CMD_ENABLE } cmd_kind_t;
 
 typedef struct {
     cmd_kind_t kind;
@@ -145,6 +145,7 @@ static uint8_t s_own_addr_type;
 static uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
 static bool s_setup_done;
 static bool s_backlog_done;
+static volatile bool s_enabled = true;
 static volatile bool s_interactive;
 static bool s_params_pending;
 static int s_params_requested;
@@ -835,6 +836,27 @@ static void on_cmd_event(struct ble_npl_event *ev)
     (void)ev;
     phone_cmd_t cmd;
     while (xQueueReceive(s_cmds, &cmd, 0) == pdTRUE) {
+        if (cmd.kind == CMD_FORGET) {
+            ESP_LOGI(TAG, "forgetting the paired phone");
+            ble_store_clear();
+            if (s_conn != BLE_HS_CONN_HANDLE_NONE) {
+                ble_gap_terminate(s_conn, BLE_ERR_REM_USER_CONN_TERM);
+            }
+            continue;
+        }
+        if (cmd.kind == CMD_ENABLE) {
+            if (!s_enabled) {
+                ESP_LOGI(TAG, "Bluetooth off");
+                ble_gap_adv_stop();
+                if (s_conn != BLE_HS_CONN_HANDLE_NONE) {
+                    ble_gap_terminate(s_conn, BLE_ERR_REM_USER_CONN_TERM);
+                }
+            } else if (s_conn == BLE_HS_CONN_HANDLE_NONE) {
+                ESP_LOGI(TAG, "Bluetooth on");
+                advertise(true);
+            }
+            continue;
+        }
         if (!s_setup_done) {
             continue;
         }
@@ -884,6 +906,22 @@ void phone_notification_action(uint32_t uid, bool positive)
     send_cmd(&c);
 }
 
+void phone_forget(void)
+{
+    phone_cmd_t c = {.kind = CMD_FORGET};
+    send_cmd(&c);
+}
+
+void phone_set_enabled(bool enabled)
+{
+    if (s_enabled == enabled) {
+        return;
+    }
+    s_enabled = enabled;
+    phone_cmd_t c = {.kind = CMD_ENABLE};
+    send_cmd(&c);
+}
+
 // ---- GAP ----
 
 static int gap_event(struct ble_gap_event *ev, void *arg)
@@ -898,6 +936,11 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
             return 0;
         }
         s_conn = ev->connect.conn_handle;
+        if (!s_enabled) {
+            // Bluetooth was turned off while this connection was being made.
+            ble_gap_terminate(s_conn, BLE_ERR_REM_USER_CONN_TERM);
+            return 0;
+        }
         reset_link_state();
         post_simple(PHONE_EVT_CONNECTED);
         ble_gattc_exchange_mtu(s_conn, NULL, NULL);
@@ -990,6 +1033,9 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
 // Fast advertising for 30s so pairing and reconnecting are quick, then about once a second.
 static void advertise(bool fast)
 {
+    if (!s_enabled) {
+        return;
+    }
     struct ble_hs_adv_fields fields = {
         .flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP,
         // Asking for ANCS makes the watch show up in the iPhone's Bluetooth settings.
@@ -1024,7 +1070,9 @@ static void on_sync(void)
     ble_hs_util_ensure_addr(0);
     ble_hs_id_infer_auto(0, &s_own_addr_type);
     advertise(true);
-    ESP_LOGI(TAG, "advertising as %s", ble_svc_gap_device_name());
+    if (s_enabled) {
+        ESP_LOGI(TAG, "advertising as %s", ble_svc_gap_device_name());
+    }
 }
 
 static void on_reset(int reason)

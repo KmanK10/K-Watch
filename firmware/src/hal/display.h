@@ -14,6 +14,7 @@ void display_sleep(void);
 // Wakes the panel, draws a fresh frame, then turns the backlight on.
 void display_wake(void);
 
+// Takes effect now, or at the next display_wake if the screen is asleep.
 void display_set_brightness(uint8_t percent);
 // Drops the backlight to a third of the set brightness, without forgetting it.
 void display_set_dimmed(bool dimmed);

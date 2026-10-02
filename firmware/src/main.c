@@ -1,9 +1,11 @@
 #include <stdbool.h>
+#include <stdio.h>
 #include <time.h>
 
 #include "board.h"
 #include "display.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -12,22 +14,24 @@
 #include "lvgl.h"
 #include "phone/phone.h"
 #include "pmu.h"
+#include "esp_app_desc.h"
+#include "settings.h"
 #include "steps.h"
 #include "ui/alert.h"
 #include "ui/countdown.h"
+#include "ui/flashlight.h"
 #include "ui/music.h"
 #include "ui/notify.h"
 #include "ui/pairing.h"
 #include "ui/screens.h"
+#include "ui/settings_screen.h"
 #include "ui/watchface.h"
 
-#define SCREEN_TIMEOUT_MS  6000
 #define NOTIFY_TIMEOUT_MS  10000
 #define ALERT_TIMEOUT_MS   60000
+#define FLASHLIGHT_TIMEOUT_MS (5 * 60 * 1000)
 #define DIM_BEFORE_OFF_MS  2000
 #define NO_TIMEOUT         UINT32_MAX
-#define TAP_TO_WAKE        true
-#define WRIST_WAKE         true
 
 static const char *TAG = "k-watch";
 
@@ -37,7 +41,7 @@ static QueueSetHandle_t s_event_set;
 
 static bool s_screen_on;
 static bool s_dimmed;
-static uint32_t s_timeout_ms = SCREEN_TIMEOUT_MS;
+static uint32_t s_timeout_ms;
 static int64_t s_screen_on_since_us;
 
 static void refresh_ui(void)
@@ -80,7 +84,7 @@ static void screen_on_for(uint32_t timeout_ms)
 
 static void screen_on(void)
 {
-    screen_on_for(SCREEN_TIMEOUT_MS);
+    screen_on_for(settings_get()->screen_timeout_s * 1000);
 }
 
 static void screen_off(void)
@@ -92,7 +96,7 @@ static void screen_off(void)
     // The next wake should show the time, not an old notification or alert.
     alert_dismiss();
     ui_show_home(false);
-    board_set_touch_wake(TAP_TO_WAKE);
+    board_set_touch_wake(settings_get()->tap_to_wake);
     board_set_screen_awake(false);
     phone_set_interactive(false);
     steps_save(false);
@@ -125,7 +129,7 @@ static void handle_imu(void)
     uint32_t evt = imu_read_events();
     board_rearm(BOARD_EVT_IMU);
 
-    if ((evt & IMU_EVT_WRIST_TILT) && WRIST_WAKE && !s_screen_on) {
+    if ((evt & IMU_EVT_WRIST_TILT) && settings_get()->raise_to_wake && !s_screen_on) {
         ESP_LOGI(TAG, "wrist tilt");
         screen_on();
     }
@@ -188,13 +192,16 @@ static void handle_phone_event(const phone_event_t *evt)
         const phone_notification_t *n = &evt->notification;
         notify_add(n);
         // Silent means the phone didn't alert either (Focus, Do Not Disturb, or the app's
-        // sounds are off), so it waits quietly in the list.
-        if (n->pre_existing || n->silent || pairing_is_showing() || alert_is_showing()) {
+        // sounds are off), so it waits quietly in the list. The watch's own DND does the same.
+        if (n->pre_existing || n->silent || settings_get()->dnd || pairing_is_showing() ||
+            alert_is_showing() || flashlight_is_on()) {
             break;
         }
         notify_show_card(n->uid);
         screen_on_for(NOTIFY_TIMEOUT_MS);
-        haptics_play(n->category == PHONE_CAT_INCOMING_CALL ? HAPTIC_ALERT : HAPTIC_NOTIFY);
+        if (settings_get()->notify_vibrate) {
+            haptics_play(n->category == PHONE_CAT_INCOMING_CALL ? HAPTIC_ALERT : HAPTIC_NOTIFY);
+        }
         break;
     }
     case PHONE_EVT_NOTIFICATION_REMOVED:
@@ -246,6 +253,40 @@ static TickType_t run_screen(void)
     return pdMS_TO_TICKS(ms) > 0 ? pdMS_TO_TICKS(ms) : 1;
 }
 
+// Wake options take effect the next time the screen turns off.
+static void apply_settings(const settings_t *s)
+{
+    display_set_brightness(s->brightness);
+    watchface_set_24h(s->clock_24h);
+    watchface_set_dnd(s->dnd);
+    phone_set_enabled(s->bluetooth);
+    if (s_screen_on && s_timeout_ms != NO_TIMEOUT) {
+        s_timeout_ms = s->screen_timeout_s * 1000;
+    }
+}
+
+// Why the watch last restarted, if it wasn't a normal power-on or flash.
+static const char *abnormal_restart_reason(void)
+{
+    switch (esp_reset_reason()) {
+    case ESP_RST_PANIC: return "crash";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT: return "froze";
+    case ESP_RST_BROWNOUT: return "battery voltage dipped";
+    default: return NULL;
+    }
+}
+
+// percent is 0 when the flashlight turns off.
+static void on_flashlight(uint8_t percent)
+{
+    display_set_brightness(percent ? percent : settings_get()->brightness);
+    if (s_screen_on) {
+        s_timeout_ms = percent ? FLASHLIGHT_TIMEOUT_MS : settings_get()->screen_timeout_s * 1000;
+    }
+}
+
 void app_main(void)
 {
     s_board_events = xQueueCreate(8, sizeof(board_event_t));
@@ -256,8 +297,23 @@ void app_main(void)
 
     ESP_ERROR_CHECK(board_init(s_board_events));
     steps_init();
+    settings_init();
 
     ui_init();
+    apply_settings(settings_get());
+    settings_on_change(apply_settings);
+    settings_screen_on_forget(phone_forget);
+    flashlight_on_change(on_flashlight);
+    char about[96];
+    const char *restart = abnormal_restart_reason();
+    if (restart) {
+        ESP_LOGW(TAG, "restarted after: %s", restart);
+        snprintf(about, sizeof(about), "K-Watch %s\nLast restart: %s", esp_app_get_description()->version,
+                 restart);
+    } else {
+        snprintf(about, sizeof(about), "K-Watch %s", esp_app_get_description()->version);
+    }
+    settings_screen_set_about(about);
     lv_timer_create(refresh_timer_cb, 1000, NULL);
     screen_on();
 

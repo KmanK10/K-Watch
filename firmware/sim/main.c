@@ -19,7 +19,10 @@
 #include "ui/music.h"
 #include "ui/notify.h"
 #include "ui/pairing.h"
+#include "settings.h"
+#include "ui/flashlight.h"
 #include "ui/screens.h"
+#include "ui/settings_screen.h"
 #include "ui/watchface.h"
 
 #define W            240
@@ -183,9 +186,38 @@ static void refresh_watchface(void)
     watchface_set_connected(s_connected);
 }
 
+static void apply_settings(const settings_t *s)
+{
+    printf("settings: brightness %d%%, timeout %d s, raise %d, tap %d, buzz %d, 24h %d, bluetooth %d, dnd %d\n",
+           s->brightness, s->screen_timeout_s, s->raise_to_wake, s->tap_to_wake, s->notify_vibrate,
+           s->clock_24h, s->bluetooth, s->dnd);
+    watchface_set_24h(s->clock_24h);
+    watchface_set_dnd(s->dnd);
+    refresh_watchface();
+}
+
+static void on_flashlight(uint8_t percent)
+{
+    if (percent) {
+        printf("flashlight on at %d%%\n", percent);
+    } else {
+        printf("flashlight off\n");
+    }
+}
+
+static void forget_phone(void)
+{
+    phone_forget();
+}
+
 static void app_init(void)
 {
+    settings_init();
     ui_init();
+    settings_on_change(apply_settings);
+    settings_screen_on_forget(forget_phone);
+    flashlight_on_change(on_flashlight);
+    settings_screen_set_about("K-Watch simulator");
     refresh_watchface();
     music_set_connected(true);
     music_update(&s_media);
@@ -198,6 +230,10 @@ static void app_init(void)
 static void show_new_notification(const phone_notification_t *n)
 {
     notify_add(n);
+    if (settings_get()->dnd) {
+        printf("do not disturb: notification added to the list quietly\n");
+        return;
+    }
     notify_show_card(n->uid);
 }
 
@@ -388,6 +424,16 @@ static lv_obj_t *find_button(lv_obj_t *root, const char *text)
     return NULL;
 }
 
+static void tap_at(int32_t x, int32_t y)
+{
+    s_touch.x = x;
+    s_touch.y = y;
+    s_touch.pressed = true;
+    advance(80);
+    s_touch.pressed = false;
+    advance(80);
+}
+
 static void tap(const char *label)
 {
     lv_obj_t *btn = find_button(lv_screen_active(), label);
@@ -425,6 +471,9 @@ static int run_shots(const char *dir)
     shot(dir, "01-watchface");
     ui_show_screen("music", false);
     shot(dir, "02-music");
+    tap(LV_SYMBOL_NEXT);
+    tap(LV_SYMBOL_NEXT);
+    shot(dir, "02-music-long-title");
     ui_show_screen("notifications", false);
     shot(dir, "03-notifications");
     notify_show_card(100);
@@ -433,14 +482,19 @@ static int run_shots(const char *dir)
     show_new_notification(&call);
     shot(dir, "05-incoming-call");
 
-    ui_show_screen("timer", false);
+    ui_show_screen("apps", false);
+    shot(dir, "14-apps");
+    tap(LV_SYMBOL_BELL);
     shot(dir, "06-timer");
     tap(LV_SYMBOL_PLAY);
     advance(83 * 1000);
     shot(dir, "07-timer-running");
     tap(LV_SYMBOL_PAUSE);
+    ui_close_overlay();
+    advance(600);
 
-    ui_show_screen("stopwatch", false);
+    tap(LV_SYMBOL_LOOP);
+    advance(600);
     tap(LV_SYMBOL_PLAY);
     advance(61 * 1000);
     tap(LV_SYMBOL_LOOP);
@@ -450,6 +504,31 @@ static int run_shots(const char *dir)
     tap(LV_SYMBOL_LOOP);
     advance(12 * 1000);
     shot(dir, "08-stopwatch");
+    ui_close_overlay();
+    advance(600);
+
+    ui_show_screen("settings", false);
+    shot(dir, "11-settings");
+    lv_obj_t *page = lv_obj_get_parent(find_button(lv_screen_active(), "Brightness"));
+    lv_obj_scroll_to_y(page, LV_COORD_MAX, LV_ANIM_OFF);
+    shot(dir, "12-settings-bottom");
+    lv_obj_scroll_to_y(page, 0, LV_ANIM_OFF);
+    tap("Do not disturb");
+    ui_show_home(false);
+    shot(dir, "13-watchface-dnd");
+    ui_show_screen("settings", false);
+    tap("Do not disturb");
+
+    ui_show_screen("apps", false);
+    tap(LV_SYMBOL_CHARGE);
+    shot(dir, "15-flashlight");
+    tap_at(120, 60);    // the light: show the controls
+    shot(dir, "16-flashlight-controls");
+    tap_at(120, 181);   // the red swatch
+    tap_at(120, 60);    // the light: hide the controls
+    shot(dir, "17-flashlight-red");
+    ui_close_overlay();
+    advance(600);
 
     alert_show("Time's up", "Timer finished", NULL);
     shot(dir, "09-alert");
