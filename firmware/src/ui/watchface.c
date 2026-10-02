@@ -9,11 +9,13 @@
 static lv_obj_t *s_time;
 static lv_obj_t *s_date;
 static lv_obj_t *s_power;
+static lv_obj_t *s_steps;
 
 static int s_last_minute = -1;
 static int s_last_day = -1;
 static int s_last_percent = -2;
 static int s_last_flags = -1;
+static uint32_t s_last_steps = UINT32_MAX;
 
 static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t color)
 {
@@ -39,6 +41,18 @@ void watchface_create(void)
 
     s_power = make_label(scr, &lv_font_montserrat_16, lv_color_white());
     lv_obj_align(s_power, LV_ALIGN_TOP_RIGHT, -8, 6);
+
+    s_steps = make_label(scr, &lv_font_montserrat_16, lv_palette_main(LV_PALETTE_GREY));
+    lv_obj_align(s_steps, LV_ALIGN_CENTER, 0, 80);
+}
+
+void watchface_set_steps(uint32_t steps)
+{
+    if (steps == s_last_steps) {
+        return;
+    }
+    s_last_steps = steps;
+    lv_label_set_text_fmt(s_steps, "%lu steps", (unsigned long)steps);
 }
 
 void watchface_set_time(const struct tm *t)

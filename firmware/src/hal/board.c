@@ -13,16 +13,32 @@
 #include "i2c_bus.h"
 #include "pmu.h"
 #include "hwclock.h"
+#include "imu.h"
 #include "touch.h"
 
 static const char *TAG = "board";
 
 static QueueHandle_t s_events;
 static esp_pm_lock_handle_t s_screen_lock;
+static bool s_imu_ok;
 
 static gpio_num_t event_pin(board_event_t evt)
 {
-    return evt == BOARD_EVT_PMU ? BOARD_PMU_INT : BOARD_TOUCH_INT;
+    switch (evt) {
+    case BOARD_EVT_PMU:
+        return BOARD_PMU_INT;
+    case BOARD_EVT_TOUCH:
+        return BOARD_TOUCH_INT;
+    case BOARD_EVT_IMU:
+        return BOARD_BMA423_INT1;
+    }
+    return GPIO_NUM_NC;
+}
+
+// The BMA423 drives its line high; the PMU and touch pull theirs low.
+static bool event_active_high(board_event_t evt)
+{
+    return evt == BOARD_EVT_IMU;
 }
 
 static void irq_handler(void *arg)
@@ -37,17 +53,20 @@ static void irq_handler(void *arg)
 static void irq_pin_init(board_event_t evt)
 {
     gpio_num_t pin = event_pin(evt);
+    bool high = event_active_high(evt);
+    gpio_int_type_t level = high ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL;
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << pin,
         .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .intr_type = GPIO_INTR_LOW_LEVEL,
+        .pull_up_en = high ? GPIO_PULLUP_DISABLE : GPIO_PULLUP_ENABLE,
+        .pull_down_en = high ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
+        .intr_type = level,
     };
     ESP_ERROR_CHECK(gpio_config(&cfg));
     // Keep the normal pin config during light sleep instead of isolating it.
     gpio_sleep_sel_dis(pin);
     ESP_ERROR_CHECK(gpio_isr_handler_add(pin, irq_handler, (void *)(uintptr_t)evt));
-    ESP_ERROR_CHECK(gpio_wakeup_enable(pin, GPIO_INTR_LOW_LEVEL));
+    ESP_ERROR_CHECK(gpio_wakeup_enable(pin, level));
 }
 
 static void keep_display_pins_in_sleep(void)
@@ -115,12 +134,17 @@ esp_err_t board_init(QueueHandle_t events)
     ESP_ERROR_CHECK(hwclock_init());
     ESP_ERROR_CHECK(touch_init());
     ESP_ERROR_CHECK(display_init());
+    // Without the IMU the watch still works, just without wrist wake and steps.
+    s_imu_ok = imu_init() == ESP_OK;
 
     sync_clock_from_rtc();
 
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
     irq_pin_init(BOARD_EVT_PMU);
     irq_pin_init(BOARD_EVT_TOUCH);
+    if (s_imu_ok) {
+        irq_pin_init(BOARD_EVT_IMU);
+    }
     board_set_touch_wake(false);
     keep_display_pins_in_sleep();
 

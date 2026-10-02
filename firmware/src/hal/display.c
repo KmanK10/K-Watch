@@ -27,6 +27,7 @@
 #define BL_TIMER           LEDC_TIMER_0
 #define BL_CHANNEL         LEDC_CHANNEL_0
 #define BL_FREQ_HZ         1000
+#define DIM_MIN_PERCENT    5
 
 static const char *TAG = "display";
 
@@ -195,6 +196,12 @@ void display_set_brightness(uint8_t percent)
 {
     s_brightness = percent > 100 ? 100 : percent;
     backlight_set_duty(s_brightness);
+}
+
+void display_set_dimmed(bool dimmed)
+{
+    uint8_t low = s_brightness / 3;
+    backlight_set_duty(dimmed ? (low < DIM_MIN_PERCENT ? DIM_MIN_PERCENT : low) : s_brightness);
 }
 
 uint32_t display_run(void)

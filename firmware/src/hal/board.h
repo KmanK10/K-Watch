@@ -9,6 +9,7 @@
 typedef enum {
     BOARD_EVT_PMU,     // button, USB or charger event: call pmu_read_events()
     BOARD_EVT_TOUCH,   // finger down while the screen was off
+    BOARD_EVT_IMU,     // motion feature fired: call imu_read_events()
 } board_event_t;
 
 // Brings up every peripheral, sets the system clock from the RTC and

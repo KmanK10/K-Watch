@@ -5,19 +5,23 @@
 #include "display.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "imu.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "lvgl.h"
 #include "pmu.h"
 #include "ui/watchface.h"
 
-#define SCREEN_TIMEOUT_MS  5000
+#define SCREEN_DIM_MS      4000
+#define SCREEN_TIMEOUT_MS  6000
 #define TAP_TO_WAKE        true
+#define WRIST_WAKE         true
 
 static const char *TAG = "k-watch";
 
 static QueueHandle_t s_events;
 static bool s_screen_on;
+static bool s_dimmed;
 static int64_t s_screen_on_since_us;
 
 static void refresh_ui(void)
@@ -30,6 +34,7 @@ static void refresh_ui(void)
     pmu_status_t p;
     pmu_get_status(&p);
     watchface_set_power(p.battery_percent, p.charging, p.usb_connected);
+    watchface_set_steps(imu_get_steps());
 }
 
 static void refresh_timer_cb(lv_timer_t *timer)
@@ -49,6 +54,7 @@ static void screen_on(void)
     refresh_ui();
     display_wake();
     s_screen_on = true;
+    s_dimmed = false;
     s_screen_on_since_us = esp_timer_get_time();
     ESP_LOGI(TAG, "screen on");
 }
@@ -85,6 +91,26 @@ static void handle_pmu(void)
     }
 }
 
+static void handle_imu(void)
+{
+    uint32_t evt = imu_read_events();
+    board_rearm(BOARD_EVT_IMU);
+
+    if ((evt & IMU_EVT_WRIST_TILT) && WRIST_WAKE && !s_screen_on) {
+        ESP_LOGI(TAG, "wrist tilt");
+        screen_on();
+    }
+}
+
+static void update_dimming(uint32_t inactive_ms)
+{
+    bool dim = inactive_ms >= SCREEN_DIM_MS;
+    if (dim != s_dimmed) {
+        s_dimmed = dim;
+        display_set_dimmed(dim);
+    }
+}
+
 void app_main(void)
 {
     s_events = xQueueCreate(8, sizeof(board_event_t));
@@ -104,8 +130,10 @@ void app_main(void)
                 screen_off();
                 continue;
             }
-            uint32_t until_off = SCREEN_TIMEOUT_MS - inactive;
-            uint32_t ms = next_ms < until_off ? next_ms : until_off;
+            update_dimming(inactive);
+            uint32_t until_change = inactive < SCREEN_DIM_MS ? SCREEN_DIM_MS - inactive
+                                                              : SCREEN_TIMEOUT_MS - inactive;
+            uint32_t ms = next_ms < until_change ? next_ms : until_change;
             wait = pdMS_TO_TICKS(ms) > 0 ? pdMS_TO_TICKS(ms) : 1;
         }
 
@@ -119,6 +147,9 @@ void app_main(void)
             break;
         case BOARD_EVT_TOUCH:
             screen_on();
+            break;
+        case BOARD_EVT_IMU:
+            handle_imu();
             break;
         }
     }

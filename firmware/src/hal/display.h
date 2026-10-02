@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -14,6 +15,8 @@ void display_sleep(void);
 void display_wake(void);
 
 void display_set_brightness(uint8_t percent);
+// Drops the backlight to a third of the set brightness, without forgetting it.
+void display_set_dimmed(bool dimmed);
 
 // Runs LVGL timers. Returns how many ms until it wants to run again.
 uint32_t display_run(void);
