@@ -181,14 +181,14 @@ static void handle_phone_event(const phone_event_t *evt)
     case PHONE_EVT_NOTIFICATION: {
         const phone_notification_t *n = &evt->notification;
         notify_add(n);
-        if (n->pre_existing || pairing_is_showing()) {
+        // Silent means the phone didn't alert either (Focus, Do Not Disturb, or the app's
+        // sounds are off), so it waits quietly in the list.
+        if (n->pre_existing || n->silent || pairing_is_showing()) {
             break;
         }
         notify_show_card(n->uid);
         screen_on_for(NOTIFY_TIMEOUT_MS);
-        if (!n->silent) {
-            haptics_play(n->category == PHONE_CAT_INCOMING_CALL ? HAPTIC_ALERT : HAPTIC_NOTIFY);
-        }
+        haptics_play(n->category == PHONE_CAT_INCOMING_CALL ? HAPTIC_ALERT : HAPTIC_NOTIFY);
         break;
     }
     case PHONE_EVT_NOTIFICATION_REMOVED:
