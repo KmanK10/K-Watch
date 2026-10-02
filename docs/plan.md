@@ -30,7 +30,8 @@ The original Arduino prototype is preserved at git tag `prototype-v0`.
 
 ## Power budget
 
-470 mAh / 24 h = ~19.5 mA average. Targets:
+Battery is a 502530 LiPo (5.0 x 25 x 30 mm), realistically ~300-350 mAh.
+300 mAh / 24 h = ~12.5 mA average. Targets:
 
 | State | Target |
 |---|---|
