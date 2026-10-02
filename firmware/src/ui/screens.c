@@ -1,5 +1,7 @@
 #include "screens.h"
 
+#include <string.h>
+
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 
@@ -147,10 +149,20 @@ static void on_scroll(lv_event_t *e)
     lv_obj_set_scroll_dir(s_tileview, dir);
 }
 
+static bool resting_on_home_ghost(void)
+{
+    lv_obj_t *active = lv_tileview_get_tile_active(s_tileview);
+    return is_home_ghost(active) && lv_obj_get_scroll_x(s_tileview) == lv_obj_get_x(active) &&
+           lv_obj_get_scroll_y(s_tileview) == lv_obj_get_y(active);
+}
+
 static void jump_home(void *arg)
 {
     (void)arg;
-    lv_tileview_set_tile(s_tileview, s_tiles[HOME], LV_ANIM_OFF);
+    // A diagonal jump scrolls one axis at a time and can pass over a stand-in on the way.
+    if (resting_on_home_ghost()) {
+        lv_tileview_set_tile(s_tileview, s_tiles[HOME], LV_ANIM_OFF);
+    }
 }
 
 static void on_scroll_end(lv_event_t *e)
@@ -163,10 +175,7 @@ static void on_scroll_end(lv_event_t *e)
 
     // The tile view picks the new tile as soon as the settle animation starts; only
     // swap the stand-in for the real watch face once it has fully slid into place.
-    lv_obj_t *active = lv_tileview_get_tile_active(s_tileview);
-    if (is_home_ghost(active) &&
-        lv_obj_get_scroll_x(s_tileview) == lv_obj_get_x(active) &&
-        lv_obj_get_scroll_y(s_tileview) == lv_obj_get_y(active)) {
+    if (resting_on_home_ghost()) {
         // The tile view finishes its own bookkeeping after this event; move on after.
         lv_async_call(jump_home, NULL);
     }
@@ -236,6 +245,20 @@ void ui_show_home(bool animate)
         lv_screen_load(s_main);
     }
     lv_tileview_set_tile(s_tileview, s_tiles[HOME], animate ? LV_ANIM_ON : LV_ANIM_OFF);
+}
+
+bool ui_show_screen(const char *name, bool animate)
+{
+    for (size_t i = 0; i < SCREEN_COUNT; i++) {
+        if (strcmp(s_screens[i].name, name) == 0) {
+            if (lv_screen_active() != s_main) {
+                lv_screen_load(s_main);
+            }
+            lv_tileview_set_tile(s_tileview, s_tiles[i], animate ? LV_ANIM_ON : LV_ANIM_OFF);
+            return true;
+        }
+    }
+    return false;
 }
 
 void ui_show_overlay(lv_obj_t *screen)

@@ -17,6 +17,9 @@ void ui_init(void);
 // Back to the watch face, closing any overlay.
 void ui_show_home(bool animate);
 
+// Jumps to a grid screen by its name in the table, e.g. "music". False if there is none.
+bool ui_show_screen(const char *name, bool animate);
+
 void ui_show_overlay(lv_obj_t *screen);
 // Slides back to whichever grid screen was showing.
 void ui_close_overlay(void);
