@@ -22,9 +22,10 @@ The original Arduino prototype is preserved at git tag `prototype-v0`.
 
 ## Lessons from the prototype
 
-- "Sleep" only turned the backlight off. The loop kept spinning at 240 MHz with no delay,
+- "Sleep" turned the screen off, but the loop kept spinning at 240 MHz with no delay,
   reading the PMU and touch controller over I2C every iteration.
-- Display controller, touch controller, radio and six BMA423 features stayed powered.
+- The LoRa radio, haptics rail and six BMA423 features stayed powered.
+- The charger was set to 4.35V on a standard 4.2V LiPo, which likely caused the swelling.
 - `info.flag.minuteChanged;` (missing `= 1`) meant the clock only redrew on wake.
   `-Wall` would have flagged it.
 

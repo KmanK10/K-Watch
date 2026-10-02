@@ -5,13 +5,24 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 
-# Console over the S3's built-in USB (the watch has no USB-UART chip)
+# Console over the S3's built-in USB (the watch has no USB-UART chip).
+# While a computer is connected, stay out of light sleep so logging and
+# flashing keep working. On a plain charger the watch sleeps normally.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 
 # Power management: frequency scaling + automatic light sleep when idle
 CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+
+# LVGL
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_MEM_SIZE=49152
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+CONFIG_LV_BUILD_EXAMPLES=n
 
 # Catch bugs early
 CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y
