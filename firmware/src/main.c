@@ -12,6 +12,7 @@
 #include "lvgl.h"
 #include "phone/phone.h"
 #include "pmu.h"
+#include "steps.h"
 #include "ui/music.h"
 #include "ui/notify.h"
 #include "ui/pairing.h"
@@ -46,7 +47,7 @@ static void refresh_ui(void)
     pmu_status_t p;
     pmu_get_status(&p);
     watchface_set_power(p.battery_percent, p.charging, p.usb_connected);
-    watchface_set_steps(imu_get_steps());
+    watchface_set_steps(steps_today());
 }
 
 static void refresh_timer_cb(lv_timer_t *timer)
@@ -90,6 +91,7 @@ static void screen_off(void)
     board_set_touch_wake(TAP_TO_WAKE);
     board_set_screen_awake(false);
     phone_set_interactive(false);
+    steps_save(false);
     s_screen_on = false;
     ESP_LOGI(TAG, "screen off after %lld ms", (esp_timer_get_time() - s_screen_on_since_us) / 1000);
 }
@@ -249,6 +251,7 @@ void app_main(void)
     xQueueAddToSet(s_phone_events, s_event_set);
 
     ESP_ERROR_CHECK(board_init(s_board_events));
+    steps_init();
 
     ui_init();
     lv_timer_create(refresh_timer_cb, 1000, NULL);
@@ -260,7 +263,10 @@ void app_main(void)
 
     while (true) {
         TickType_t wait = run_screen();
+        TickType_t until_midnight = steps_ticks_until_midnight();
+        wait = until_midnight < wait ? until_midnight : wait;
         QueueSetMemberHandle_t ready = xQueueSelectFromSet(s_event_set, wait);
+        steps_check_day();
 
         if (ready == s_board_events) {
             board_event_t evt;
