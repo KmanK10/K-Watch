@@ -65,13 +65,13 @@ void music_create(lv_obj_t *parent)
     s_title = ui_label(parent, &lv_font_montserrat_20, lv_color_white());
     lv_obj_set_width(s_title, CONTENT_W);
     lv_obj_set_style_text_align(s_title, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(s_title, LV_LABEL_LONG_MODE_DOTS);
+    lv_label_set_long_mode(s_title, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
     lv_obj_align(s_title, LV_ALIGN_CENTER, 0, -62);
 
     s_artist = ui_label(parent, &lv_font_montserrat_16, UI_COLOR_ACCENT);
     lv_obj_set_width(s_artist, CONTENT_W);
     lv_obj_set_style_text_align(s_artist, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(s_artist, LV_LABEL_LONG_MODE_DOTS);
+    lv_label_set_long_mode(s_artist, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
     lv_obj_align(s_artist, LV_ALIGN_CENTER, 0, -36);
 
     lv_obj_t *controls = row(parent, 10);
