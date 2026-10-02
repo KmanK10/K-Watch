@@ -3,8 +3,10 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 
+#include "ui/countdown.h"
 #include "ui/music.h"
 #include "ui/notify.h"
+#include "ui/stopwatch.h"
 #include "ui/theme.h"
 #include "ui/watchface.h"
 
@@ -18,12 +20,14 @@ typedef struct {
     void (*on_show)(void);               // optional, called each time it is swiped to
 } ui_screen_t;
 
-// Swipe left on the watch face for music, swipe up for notifications.
-// The home screen must stay first.
+// From the watch face: swipe left for music, up for notifications, right for the
+// timer and then the stopwatch. The home screen must stay first.
 static const ui_screen_t s_screens[] = {
     {"watch face", 0, 0, watchface_create, NULL},
     {"music", 1, 0, music_create, NULL},
     {"notifications", 0, 1, notify_list_create, notify_list_on_show},
+    {"timer", -1, 0, countdown_create, NULL},
+    {"stopwatch", -2, 0, stopwatch_create, stopwatch_on_show},
 };
 #define SCREEN_COUNT (sizeof(s_screens) / sizeof(s_screens[0]))
 #define HOME 0

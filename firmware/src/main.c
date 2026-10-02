@@ -13,6 +13,8 @@
 #include "phone/phone.h"
 #include "pmu.h"
 #include "steps.h"
+#include "ui/alert.h"
+#include "ui/countdown.h"
 #include "ui/music.h"
 #include "ui/notify.h"
 #include "ui/pairing.h"
@@ -21,6 +23,7 @@
 
 #define SCREEN_TIMEOUT_MS  6000
 #define NOTIFY_TIMEOUT_MS  10000
+#define ALERT_TIMEOUT_MS   60000
 #define DIM_BEFORE_OFF_MS  2000
 #define NO_TIMEOUT         UINT32_MAX
 #define TAP_TO_WAKE        true
@@ -86,7 +89,8 @@ static void screen_off(void)
         return;
     }
     display_sleep();
-    // The next wake should show the time, not an old notification.
+    // The next wake should show the time, not an old notification or alert.
+    alert_dismiss();
     ui_show_home(false);
     board_set_touch_wake(TAP_TO_WAKE);
     board_set_screen_awake(false);
@@ -185,7 +189,7 @@ static void handle_phone_event(const phone_event_t *evt)
         notify_add(n);
         // Silent means the phone didn't alert either (Focus, Do Not Disturb, or the app's
         // sounds are off), so it waits quietly in the list.
-        if (n->pre_existing || n->silent || pairing_is_showing()) {
+        if (n->pre_existing || n->silent || pairing_is_showing() || alert_is_showing()) {
             break;
         }
         notify_show_card(n->uid);
@@ -265,8 +269,15 @@ void app_main(void)
         TickType_t wait = run_screen();
         TickType_t until_midnight = steps_ticks_until_midnight();
         wait = until_midnight < wait ? until_midnight : wait;
+        TickType_t until_timer = countdown_ticks_until_done();
+        wait = until_timer < wait ? until_timer : wait;
         QueueSetMemberHandle_t ready = xQueueSelectFromSet(s_event_set, wait);
         steps_check_day();
+        if (countdown_check_done()) {
+            ESP_LOGI(TAG, "timer done");
+            alert_show("Time's up", "Timer finished", screen_on);
+            screen_on_for(ALERT_TIMEOUT_MS);
+        }
 
         if (ready == s_board_events) {
             board_event_t evt;
