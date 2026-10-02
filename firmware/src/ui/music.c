@@ -17,12 +17,6 @@ static lv_obj_t *s_controls;
 static phone_media_t s_media;
 static bool s_connected;
 
-static void on_back(lv_event_t *e)
-{
-    (void)e;
-    watchface_show();
-}
-
 static void on_command(lv_event_t *e)
 {
     phone_media_command((phone_media_cmd_t)(uintptr_t)lv_event_get_user_data(e));
@@ -52,7 +46,7 @@ static lv_obj_t *row(int32_t y)
 static void create(void)
 {
     s_screen = ui_screen_create();
-    lv_obj_add_event_cb(s_screen, on_back, LV_EVENT_GESTURE_RIGHT, NULL);
+    ui_on_swipe(s_screen, LV_EVENT_GESTURE_RIGHT, watchface_show);
 
     s_title = ui_label(s_screen, &lv_font_montserrat_20, lv_color_white());
     lv_obj_set_width(s_title, CONTENT_W);

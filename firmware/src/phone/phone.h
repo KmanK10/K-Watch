@@ -31,7 +31,9 @@ typedef struct {
     bool has_positive;   // e.g. accept a call
     bool has_negative;   // e.g. decline a call, or clear the notification
     char app_id[48];     // bundle ID, e.g. com.apple.MobileSMS
-    char title[64];
+    char app_name[32];   // display name from the phone, e.g. Messages (may be empty)
+    char title[64];      // often the sender; iOS uses the app name when the app sets none
+    char subtitle[64];   // e.g. an email subject (often empty)
     char message[192];
 } phone_notification_t;
 
@@ -84,3 +86,6 @@ esp_err_t phone_init(QueueHandle_t events);
 void phone_media_command(phone_media_cmd_t cmd);
 // positive: accept a call. negative: decline a call or clear the notification on the phone.
 void phone_notification_action(uint32_t uid, bool positive);
+
+// A fast connection while the user is interacting, a slow one otherwise.
+void phone_set_interactive(bool interactive);

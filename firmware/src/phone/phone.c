@@ -54,11 +54,14 @@ static const ble_uuid16_t CCCD = BLE_UUID16_INIT(BLE_GATT_DSC_CLT_CFG_UUID16);
 #define FLAG_POSITIVE_ACTION   (1 << 3)
 #define FLAG_NEGATIVE_ACTION   (1 << 4)
 #define CMD_GET_NOTIF_ATTRS    0
+#define CMD_GET_APP_ATTRS      1
 #define CMD_PERFORM_ACTION     2
+#define APP_ATTR_DISPLAY_NAME  0
 #define ATTR_APP_ID            0
 #define ATTR_TITLE             1
+#define ATTR_SUBTITLE          2
 #define ATTR_MESSAGE           3
-#define ATTR_COUNT             3
+#define ATTR_COUNT             4
 
 // AMS protocol values
 #define ENTITY_PLAYER          0
@@ -74,6 +77,7 @@ static const ble_uuid16_t CCCD = BLE_UUID16_INIT(BLE_GATT_DSC_CLT_CFG_UUID16);
 #define DATA_BUF_SIZE          512
 #define WRITE_QUEUE_LEN        8
 #define CMD_QUEUE_LEN          8
+#define APP_CACHE_LEN          16
 
 typedef enum {
     STEP_ANCS_SVC,
@@ -115,11 +119,18 @@ typedef struct {
 typedef struct {
     uint16_t handle;
     uint8_t len;
-    uint8_t data[16];
+    uint8_t data[64];
     bool is_ancs_request;
 } write_op_t;
 
-typedef enum { CMD_MEDIA, CMD_NOTIF_ACTION } cmd_kind_t;
+typedef enum { REQ_NOTIFICATION, REQ_APP_NAME } request_kind_t;
+
+typedef struct {
+    char app_id[48];
+    char name[32];
+} app_name_t;
+
+typedef enum { CMD_MEDIA, CMD_NOTIF_ACTION, CMD_LINK_SPEED } cmd_kind_t;
 
 typedef struct {
     cmd_kind_t kind;
@@ -133,7 +144,11 @@ static struct ble_npl_event s_cmd_event;
 static uint8_t s_own_addr_type;
 static uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
 static bool s_setup_done;
-static bool s_slow_link;
+static bool s_backlog_done;
+static volatile bool s_interactive;
+static bool s_params_pending;
+static int s_params_requested;
+static int s_params_applied = -1;   // 1 fast, 0 slow, -1 unknown
 
 static service_t s_ancs, s_cts, s_ams;
 static uint16_t s_notif_src, s_notif_src_cccd;
@@ -146,6 +161,10 @@ static uint16_t s_entity, s_entity_cccd;
 static pending_t s_pending[PENDING_MAX];
 static int s_pending_count;
 static bool s_request_active;
+static request_kind_t s_request_kind;
+static phone_event_t s_ready;   // notification being fetched, waiting for its app name
+static app_name_t s_app_names[APP_CACHE_LEN];
+static int s_app_next;
 static uint8_t s_data[DATA_BUF_SIZE];
 static size_t s_data_len;
 
@@ -189,7 +208,9 @@ static void reset_link_state(void)
     s_data_src = s_data_src_cccd = s_time = s_time_cccd = 0;
     s_remote_cmd = s_remote_cmd_cccd = s_entity = s_entity_cccd = 0;
     s_setup_done = false;
-    s_slow_link = false;
+    s_backlog_done = false;
+    s_params_pending = false;
+    s_params_applied = -1;
     s_pending_count = 0;
     s_request_active = false;
     s_data_len = 0;
@@ -200,7 +221,7 @@ static void reset_link_state(void)
 
 // ---- Write queue (used once setup is done) ----
 
-static void finish_request(void);
+static void fail_request(void);
 
 static void write_pump(void);
 
@@ -220,7 +241,7 @@ static int on_queued_write(uint16_t conn, const struct ble_gatt_error *err,
 
     // A failed details request usually means the notification is already gone.
     if (was_ancs_request && err->status != 0) {
-        finish_request();
+        fail_request();
     }
     write_pump();
     return 0;
@@ -268,7 +289,60 @@ static void finish_request(void)
     request_next_notification();
 }
 
-static void request_power_saving_params(void);
+static void deliver_ready(void)
+{
+    const phone_notification_t *n = &s_ready.notification;
+    ESP_LOGI(TAG, "notification %lu from %s%s", (unsigned long)n->uid,
+             n->app_name[0] ? n->app_name : n->app_id, n->pre_existing ? " (already on phone)" : "");
+    post(&s_ready);
+    finish_request();
+}
+
+// If only the app name lookup failed, the notification is still worth showing.
+static void fail_request(void)
+{
+    if (s_request_active && s_request_kind == REQ_APP_NAME) {
+        deliver_ready();
+    } else {
+        finish_request();
+    }
+}
+
+static const char *cached_app_name(const char *app_id)
+{
+    for (int i = 0; i < APP_CACHE_LEN; i++) {
+        if (strcmp(s_app_names[i].app_id, app_id) == 0) {
+            return s_app_names[i].name;
+        }
+    }
+    return NULL;
+}
+
+static void cache_app_name(const char *app_id, const char *name)
+{
+    app_name_t *slot = &s_app_names[s_app_next];
+    s_app_next = (s_app_next + 1) % APP_CACHE_LEN;
+    strlcpy(slot->app_id, app_id, sizeof(slot->app_id));
+    strlcpy(slot->name, name, sizeof(slot->name));
+}
+
+static void request_app_name(void)
+{
+    const char *app_id = s_ready.notification.app_id;
+    size_t len = strlen(app_id);
+    uint8_t cmd[2 + sizeof(s_ready.notification.app_id)];
+    cmd[0] = CMD_GET_APP_ATTRS;
+    memcpy(&cmd[1], app_id, len + 1);
+    cmd[len + 2] = APP_ATTR_DISPLAY_NAME;
+
+    s_request_kind = REQ_APP_NAME;
+    s_data_len = 0;
+    if (!write_enqueue(s_ctrl_pt, cmd, len + 3, true)) {
+        deliver_ready();
+    }
+}
+
+static void apply_link_params(void);
 
 static void request_next_notification(void)
 {
@@ -276,10 +350,10 @@ static void request_next_notification(void)
         return;
     }
     if (s_pending_count == 0) {
-        // Stay on the fast connection until the backlog is fetched, then slow down.
-        if (!s_slow_link) {
-            s_slow_link = true;
-            request_power_saving_params();
+        // Stay on the fast connection until the backlog is fetched.
+        if (!s_backlog_done) {
+            s_backlog_done = true;
+            apply_link_params();
         }
         return;
     }
@@ -289,9 +363,11 @@ static void request_next_notification(void)
         uid & 0xFF, (uid >> 8) & 0xFF, (uid >> 16) & 0xFF, uid >> 24,
         ATTR_APP_ID,
         ATTR_TITLE, sizeof(((phone_notification_t *)0)->title) - 1, 0,
+        ATTR_SUBTITLE, sizeof(((phone_notification_t *)0)->subtitle) - 1, 0,
         ATTR_MESSAGE, sizeof(((phone_notification_t *)0)->message) - 1, 0,
     };
     s_request_active = true;
+    s_request_kind = REQ_NOTIFICATION;
     s_data_len = 0;
     if (!write_enqueue(s_ctrl_pt, cmd, sizeof(cmd), true)) {
         finish_request();
@@ -328,12 +404,36 @@ static bool parse_data_source(phone_notification_t *n)
             copy_attr(n->app_id, sizeof(n->app_id), val, len);
         } else if (id == ATTR_TITLE) {
             copy_attr(n->title, sizeof(n->title), val, len);
+        } else if (id == ATTR_SUBTITLE) {
+            copy_attr(n->subtitle, sizeof(n->subtitle), val, len);
         } else if (id == ATTR_MESSAGE) {
             copy_attr(n->message, sizeof(n->message), val, len);
         }
         pos += 3 + len;
     }
     n->uid = s_data[1] | (s_data[2] << 8) | (s_data[3] << 16) | ((uint32_t)s_data[4] << 24);
+    return true;
+}
+
+// Response to Get App Attributes: command, app ID (NUL-terminated), then one attribute.
+static bool parse_app_name(char *out, size_t out_size)
+{
+    if (s_data_len < 2 || s_data[0] != CMD_GET_APP_ATTRS) {
+        return false;
+    }
+    const uint8_t *nul = memchr(&s_data[1], '\0', s_data_len - 1);
+    if (!nul) {
+        return false;
+    }
+    size_t pos = (nul - s_data) + 1;
+    if (pos + 3 > s_data_len) {
+        return false;
+    }
+    size_t len = s_data[pos + 1] | (s_data[pos + 2] << 8);
+    if (pos + 3 + len > s_data_len) {
+        return false;
+    }
+    copy_attr(out, out_size, &s_data[pos + 3], len);
     return true;
 }
 
@@ -344,25 +444,39 @@ static void on_data_source(const uint8_t *data, size_t len)
     }
     if (s_data_len + len > sizeof(s_data)) {
         ESP_LOGW(TAG, "notification too large, skipped");
-        finish_request();
+        fail_request();
         return;
     }
     memcpy(&s_data[s_data_len], data, len);
     s_data_len += len;
 
-    phone_event_t evt = {.type = PHONE_EVT_NOTIFICATION};
-    phone_notification_t *n = &evt.notification;
-    if (parse_data_source(n)) {
-        const pending_t *p = &s_pending[0];
-        n->category = p->category;
-        n->pre_existing = p->flags & FLAG_PRE_EXISTING;
-        n->silent = p->flags & FLAG_SILENT;
-        n->has_positive = p->flags & FLAG_POSITIVE_ACTION;
-        n->has_negative = p->flags & FLAG_NEGATIVE_ACTION;
-        ESP_LOGI(TAG, "notification %lu from %s%s", (unsigned long)n->uid, n->app_id,
-                 n->pre_existing ? " (already on phone)" : "");
-        post(&evt);
-        finish_request();
+    phone_notification_t *n = &s_ready.notification;
+    if (s_request_kind == REQ_APP_NAME) {
+        if (parse_app_name(n->app_name, sizeof(n->app_name))) {
+            cache_app_name(n->app_id, n->app_name);
+            deliver_ready();
+        }
+        return;
+    }
+
+    memset(&s_ready, 0, sizeof(s_ready));
+    s_ready.type = PHONE_EVT_NOTIFICATION;
+    if (!parse_data_source(n)) {
+        return;
+    }
+    const pending_t *p = &s_pending[0];
+    n->category = p->category;
+    n->pre_existing = p->flags & FLAG_PRE_EXISTING;
+    n->silent = p->flags & FLAG_SILENT;
+    n->has_positive = p->flags & FLAG_POSITIVE_ACTION;
+    n->has_negative = p->flags & FLAG_NEGATIVE_ACTION;
+
+    const char *name = cached_app_name(n->app_id);
+    if (name || n->app_id[0] == '\0') {
+        strlcpy(n->app_name, name ? name : "", sizeof(n->app_name));
+        deliver_ready();
+    } else {
+        request_app_name();
     }
 }
 
@@ -387,6 +501,16 @@ static void on_notification_source(const uint8_t *data, size_t len)
         s_pending[s_pending_count++] = (pending_t){.uid = uid, .category = category, .flags = flags};
         request_next_notification();
     } else if (event_id == EVT_REMOVED) {
+        ESP_LOGI(TAG, "notification %lu removed", (unsigned long)uid);
+        // No point asking for details of one that is gone; leave the in-flight one alone.
+        for (int i = s_request_active ? 1 : 0; i < s_pending_count; i++) {
+            if (s_pending[i].uid == uid) {
+                memmove(&s_pending[i], &s_pending[i + 1],
+                        (s_pending_count - i - 1) * sizeof(s_pending[0]));
+                s_pending_count--;
+                break;
+            }
+        }
         phone_event_t evt = {.type = PHONE_EVT_NOTIFICATION_REMOVED, .uid = uid};
         post(&evt);
     }
@@ -598,16 +722,35 @@ static void discover_dscs(service_t *s)
     }
 }
 
-static void request_power_saving_params(void)
+// Fast while the screen is on so buttons feel instant, slow otherwise to save power.
+// Both stay within Apple's accessory guidelines: max >= min + 15ms, max * (latency + 1) <= 2s.
+static void apply_link_params(void)
 {
-    // Within Apple's accessory guidelines: max >= min + 15ms, max * (latency + 1) <= 2s.
-    struct ble_gap_upd_params p = {
+    static const struct ble_gap_upd_params fast = {
+        .itvl_min = BLE_GAP_CONN_ITVL_MS(15),
+        .itvl_max = BLE_GAP_CONN_ITVL_MS(30),
+        .latency = 0,
+        .supervision_timeout = BLE_GAP_SUPERVISION_TIMEOUT_MS(4000),
+    };
+    static const struct ble_gap_upd_params slow = {
         .itvl_min = BLE_GAP_CONN_ITVL_MS(150),
         .itvl_max = BLE_GAP_CONN_ITVL_MS(180),
         .latency = 4,
         .supervision_timeout = BLE_GAP_SUPERVISION_TIMEOUT_MS(6000),
     };
-    ble_gap_update_params(s_conn, &p);
+    // Overlapping update requests can go unanswered and drop the link, so only one at a time.
+    if (s_conn == BLE_HS_CONN_HANDLE_NONE || !s_backlog_done || s_params_pending) {
+        return;
+    }
+    int want = s_interactive ? 1 : 0;
+    if (want == s_params_applied) {
+        return;
+    }
+    struct ble_gap_upd_params p = want ? fast : slow;
+    if (ble_gap_update_params(s_conn, &p) == 0) {
+        s_params_pending = true;
+        s_params_requested = want;
+    }
 }
 
 static void run_step(setup_step_t step)
@@ -694,7 +837,9 @@ static void on_cmd_event(struct ble_npl_event *ev)
         if (!s_setup_done) {
             continue;
         }
-        if (cmd.kind == CMD_MEDIA) {
+        if (cmd.kind == CMD_LINK_SPEED) {
+            apply_link_params();
+        } else if (cmd.kind == CMD_MEDIA) {
             write_enqueue(s_remote_cmd, &cmd.arg, 1, false);
         } else {
             const uint8_t data[] = {
@@ -718,6 +863,16 @@ static void send_cmd(const phone_cmd_t *cmd)
 void phone_media_command(phone_media_cmd_t cmd)
 {
     phone_cmd_t c = {.kind = CMD_MEDIA, .arg = (uint8_t)cmd};
+    send_cmd(&c);
+}
+
+void phone_set_interactive(bool interactive)
+{
+    if (s_interactive == interactive) {
+        return;
+    }
+    s_interactive = interactive;
+    phone_cmd_t c = {.kind = CMD_LINK_SPEED};
     send_cmd(&c);
 }
 
@@ -808,9 +963,16 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
 
     case BLE_GAP_EVENT_CONN_UPDATE:
         if (ble_gap_conn_find(ev->conn_update.conn_handle, &desc) == 0) {
-            ESP_LOGI(TAG, "connection interval %d ms, latency %d",
-                     desc.conn_itvl * 5 / 4, desc.conn_latency);
+            ESP_LOGI(TAG, "connection interval %d ms, latency %d%s",
+                     desc.conn_itvl * 5 / 4, desc.conn_latency,
+                     ev->conn_update.status ? " (update refused)" : "");
         }
+        if (s_params_pending) {
+            s_params_pending = false;
+            s_params_applied = ev->conn_update.status == 0 ? s_params_requested : -1;
+        }
+        // The screen may have changed state while we waited.
+        apply_link_params();
         return 0;
 
     case BLE_GAP_EVENT_ADV_COMPLETE:

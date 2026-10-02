@@ -64,6 +64,7 @@ static void screen_on_for(uint32_t timeout_ms)
     }
     board_set_screen_awake(true);
     board_set_touch_wake(false);
+    phone_set_interactive(true);
     refresh_ui();
     display_wake();
     s_screen_on = true;
@@ -87,6 +88,7 @@ static void screen_off(void)
     watchface_show();
     board_set_touch_wake(TAP_TO_WAKE);
     board_set_screen_awake(false);
+    phone_set_interactive(false);
     s_screen_on = false;
     ESP_LOGI(TAG, "screen off after %lld ms", (esp_timer_get_time() - s_screen_on_since_us) / 1000);
 }

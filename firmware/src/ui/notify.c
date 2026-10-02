@@ -1,6 +1,7 @@
 #include "notify.h"
 
 #include <string.h>
+#include <strings.h>
 
 #include "lvgl.h"
 #include "ui/text.h"
@@ -16,6 +17,7 @@ static int s_count;
 static lv_obj_t *s_card;
 static lv_obj_t *s_card_app;
 static lv_obj_t *s_card_title;
+static lv_obj_t *s_card_subtitle;
 static lv_obj_t *s_card_message;
 static lv_obj_t *s_card_actions;
 static uint32_t s_card_uid;
@@ -24,36 +26,20 @@ static bool s_card_from_list;
 static lv_obj_t *s_list;
 static lv_obj_t *s_list_items;
 
-typedef struct {
-    const char *bundle_id;
-    const char *name;
-} app_name_t;
-
-static const app_name_t s_app_names[] = {
-    {"com.apple.MobileSMS", "Messages"},
-    {"com.apple.mobilephone", "Phone"},
-    {"com.apple.mobilemail", "Mail"},
-    {"com.apple.mobilecal", "Calendar"},
-    {"com.apple.reminders", "Reminders"},
-    {"com.apple.facetime", "FaceTime"},
-    {"com.facebook.Messenger", "Messenger"},
-    {"net.whatsapp.WhatsApp", "WhatsApp"},
-    {"com.hammerandchisel.discord", "Discord"},
-    {"com.toyopagroup.picaboo", "Snapchat"},
-    {"com.burbn.instagram", "Instagram"},
-    {"com.google.Gmail", "Gmail"},
-};
-
 // Falls back to the last part of the bundle ID, e.g. "com.example.Foo" -> "Foo".
-static const char *app_display_name(const char *bundle_id)
+static const char *app_display_name(const phone_notification_t *n)
 {
-    for (size_t i = 0; i < sizeof(s_app_names) / sizeof(s_app_names[0]); i++) {
-        if (strcmp(bundle_id, s_app_names[i].bundle_id) == 0) {
-            return s_app_names[i].name;
-        }
+    if (n->app_name[0]) {
+        return n->app_name;
     }
-    const char *dot = strrchr(bundle_id, '.');
-    return dot ? dot + 1 : bundle_id;
+    const char *dot = strrchr(n->app_id, '.');
+    return dot ? dot + 1 : n->app_id;
+}
+
+// Apps without a title get their own name as the title, which would just repeat the header.
+static bool title_is_useful(const phone_notification_t *n)
+{
+    return n->title[0] && strcasecmp(n->title, app_display_name(n)) != 0;
 }
 
 static void set_ascii_text(lv_obj_t *label, const char *utf8)
@@ -128,10 +114,11 @@ static void create_card(void)
     lv_obj_set_scroll_dir(s_card, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s_card, LV_SCROLLBAR_MODE_OFF);
     lv_obj_add_event_cb(s_card, on_card_back, LV_EVENT_SHORT_CLICKED, NULL);
-    lv_obj_add_event_cb(s_card, on_card_back, LV_EVENT_GESTURE_RIGHT, NULL);
+    ui_on_swipe(s_card, LV_EVENT_GESTURE_RIGHT, card_back);
 
     s_card_app = card_label(&lv_font_montserrat_16, UI_COLOR_ACCENT);
     s_card_title = card_label(&lv_font_montserrat_20, lv_color_white());
+    s_card_subtitle = card_label(&lv_font_montserrat_16, lv_color_white());
     s_card_message = card_label(&lv_font_montserrat_16, lv_color_white());
 
     s_card_actions = lv_obj_create(s_card);
@@ -166,9 +153,12 @@ void notify_show_card(uint32_t uid)
     if (call) {
         lv_label_set_text(s_card_app, LV_SYMBOL_CALL " Incoming call");
     } else {
-        set_ascii_text(s_card_app, app_display_name(n->app_id));
+        set_ascii_text(s_card_app, app_display_name(n));
     }
     set_ascii_text(s_card_title, n->title);
+    lv_obj_set_hidden(s_card_title, !title_is_useful(n));
+    set_ascii_text(s_card_subtitle, n->subtitle);
+    lv_obj_set_hidden(s_card_subtitle, n->subtitle[0] == '\0');
     set_ascii_text(s_card_message, n->message);
     lv_obj_set_hidden(s_card_message, n->message[0] == '\0');
 
@@ -190,12 +180,6 @@ void notify_show_card(uint32_t uid)
 
 // ---- List ----
 
-static void on_list_back(lv_event_t *e)
-{
-    (void)e;
-    watchface_show();
-}
-
 static void on_item_clicked(lv_event_t *e)
 {
     notify_show_card((uint32_t)(uintptr_t)lv_event_get_user_data(e));
@@ -212,7 +196,7 @@ static void create_list(void)
     lv_obj_set_style_pad_row(s_list, 8, 0);
     lv_obj_set_flex_flow(s_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_add_event_cb(s_list, on_list_back, LV_EVENT_GESTURE_RIGHT, NULL);
+    ui_on_swipe(s_list, LV_EVENT_GESTURE_RIGHT, watchface_show);
 
     lv_obj_t *heading = ui_label(s_list, &lv_font_montserrat_16, UI_COLOR_ACCENT);
     lv_label_set_text(heading, LV_SYMBOL_BELL " Notifications");
@@ -259,8 +243,11 @@ static void rebuild_list(void)
         lv_obj_set_gesture_bubble(item, true);
         lv_obj_add_event_cb(item, on_item_clicked, LV_EVENT_SHORT_CLICKED, (void *)(uintptr_t)n->uid);
 
-        item_label(item, &lv_font_montserrat_16, UI_COLOR_ACCENT, app_display_name(n->app_id));
-        item_label(item, &lv_font_montserrat_16, lv_color_white(), n->title);
+        item_label(item, &lv_font_montserrat_16, UI_COLOR_ACCENT, app_display_name(n));
+        const char *heading = title_is_useful(n) ? n->title : n->subtitle;
+        if (heading[0]) {
+            item_label(item, &lv_font_montserrat_16, lv_color_white(), heading);
+        }
         if (n->message[0]) {
             item_label(item, &lv_font_montserrat_16, UI_COLOR_DIM, n->message);
         }

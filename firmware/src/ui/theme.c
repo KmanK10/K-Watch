@@ -18,6 +18,18 @@ lv_obj_t *ui_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t color)
     return label;
 }
 
+static void on_swipe(lv_event_t *e)
+{
+    void (*fn)(void) = (void (*)(void))lv_event_get_user_data(e);
+    lv_indev_wait_release(lv_indev_active());
+    fn();
+}
+
+void ui_on_swipe(lv_obj_t *screen, lv_event_code_t gesture, void (*fn)(void))
+{
+    lv_obj_add_event_cb(screen, on_swipe, gesture, (void *)fn);
+}
+
 lv_obj_t *ui_round_button(lv_obj_t *parent, const char *text, int32_t size, lv_color_t bg)
 {
     lv_obj_t *btn = lv_button_create(parent);
