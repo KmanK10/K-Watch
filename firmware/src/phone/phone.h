@@ -1,8 +1,8 @@
 #pragma once
 
-// iPhone link over Bluetooth LE, using only services built into iOS:
-// ANCS for notifications, AMS for media control and CTS for the time.
-// No phone app is required.
+// iPhone link over Bluetooth LE, using services built into iOS: ANCS for notifications, AMS for
+// media control and CTS for the time. These need no phone app. The optional companion app adds
+// weather, settings and reports over its own service (docs/companion-protocol.md).
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -56,6 +56,7 @@ typedef enum {
     PHONE_EVT_NOTIFICATION_REMOVED,
     PHONE_EVT_TIME,
     PHONE_EVT_MEDIA,
+    PHONE_EVT_COMPANION,        // a JSON message from the companion app; free `message` after
 } phone_event_type_t;
 
 typedef struct {
@@ -66,6 +67,7 @@ typedef struct {
         struct tm time;
         phone_notification_t notification;
         phone_media_t media;
+        char *message;
     };
 } phone_event_t;
 
@@ -99,3 +101,9 @@ void phone_set_enabled(bool enabled);
 
 // A fast connection while the user is interacting, a slow one otherwise.
 void phone_set_interactive(bool interactive);
+
+// Sends a JSON message to the companion app (docs/companion-protocol.md). Any task.
+// False if the app isn't connected.
+bool phone_companion_send(const char *json);
+// True while the companion app is connected and listening.
+bool phone_companion_ready(void);

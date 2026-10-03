@@ -26,6 +26,7 @@ static uint32_t s_raw_start;    // sensor count when today began (or at boot)
 static uint32_t s_saved;
 static int64_t s_saved_at_us;
 static uint32_t s_goal = DEFAULT_GOAL;
+static void (*s_on_goal_change)(void);
 
 // Totals of finished days. steps[i] is for the day `i` days before last_day.
 typedef struct {
@@ -260,4 +261,12 @@ void steps_set_goal(uint32_t goal)
         nvs_commit(h);
     }
     nvs_close(h);
+    if (s_on_goal_change) {
+        s_on_goal_change();
+    }
+}
+
+void steps_on_goal_change(void (*cb)(void))
+{
+    s_on_goal_change = cb;
 }

@@ -4,20 +4,29 @@
 
 #include "lvgl.h"
 #include "ui/theme.h"
+#include "ui/weather_icon.h"
+
+#define GOAL_BAR_W     110
+#define COLOR_GOAL_MET lv_color_hex(0x2EBD59)
 
 static lv_obj_t *s_bluetooth;
 static lv_obj_t *s_time;
 static lv_obj_t *s_date;
 static lv_obj_t *s_power;
 static lv_obj_t *s_steps;
+static lv_obj_t *s_goal_bar;
 static lv_obj_t *s_dnd;
 static lv_obj_t *s_alarm;
+static lv_obj_t *s_weather;
+static lv_obj_t *s_weather_icon;
+static lv_obj_t *s_weather_temp;
 
 static int s_last_minute = -1;
 static int s_last_day = -1;
 static int s_last_percent = -2;
 static int s_last_flags = -1;
 static uint32_t s_last_steps = UINT32_MAX;
+static uint32_t s_last_goal;
 static bool s_24h;
 
 void watchface_create(lv_obj_t *parent)
@@ -32,7 +41,15 @@ void watchface_create(lv_obj_t *parent)
     lv_obj_align(s_power, LV_ALIGN_TOP_RIGHT, -8, 6);
 
     s_steps = ui_label(parent, &lv_font_montserrat_16, UI_COLOR_DIM);
-    lv_obj_align(s_steps, LV_ALIGN_CENTER, 0, 80);
+    lv_obj_align(s_steps, LV_ALIGN_CENTER, 0, 76);
+
+    s_goal_bar = lv_bar_create(parent);
+    lv_obj_set_size(s_goal_bar, GOAL_BAR_W, 6);
+    lv_obj_align(s_goal_bar, LV_ALIGN_CENTER, 0, 97);
+    lv_obj_set_style_bg_color(s_goal_bar, lv_color_hex(0x333333), 0);
+    lv_obj_set_style_bg_opa(s_goal_bar, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_goal_bar, UI_COLOR_ACCENT, LV_PART_INDICATOR);
+    lv_bar_set_range(s_goal_bar, 0, GOAL_BAR_W);
 
     s_bluetooth = ui_label(parent, &lv_font_montserrat_16, lv_palette_main(LV_PALETTE_BLUE));
     lv_label_set_text(s_bluetooth, LV_SYMBOL_BLUETOOTH);
@@ -48,6 +65,29 @@ void watchface_create(lv_obj_t *parent)
     lv_label_set_text(s_dnd, "DND");
     lv_obj_align(s_dnd, LV_ALIGN_TOP_MID, 0, 7);
     lv_obj_set_hidden(s_dnd, true);
+
+    s_weather = lv_obj_create(parent);
+    lv_obj_remove_style_all(s_weather);
+    lv_obj_set_size(s_weather, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s_weather, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_weather, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(s_weather, 6, 0);
+    lv_obj_set_scrollable(s_weather, false);
+    lv_obj_set_clickable(s_weather, false);
+    lv_obj_align(s_weather, LV_ALIGN_CENTER, 0, -60);
+    s_weather_icon = weather_icon_create(s_weather, 28);
+    s_weather_temp = weather_temp_create(s_weather, &lv_font_montserrat_20, lv_color_white());
+    lv_obj_set_hidden(s_weather, true);
+}
+
+void watchface_set_weather(const weather_t *w)
+{
+    lv_obj_set_hidden(s_weather, w == NULL);
+    if (!w) {
+        return;
+    }
+    weather_icon_set(s_weather_icon, w->code, w->day);
+    weather_temp_set(s_weather_temp, w->temp);
 }
 
 void watchface_set_dnd(bool on)
@@ -75,13 +115,19 @@ void watchface_set_24h(bool on)
     }
 }
 
-void watchface_set_steps(uint32_t steps)
+void watchface_set_steps(uint32_t steps, uint32_t goal)
 {
-    if (steps == s_last_steps) {
+    if (steps == s_last_steps && goal == s_last_goal) {
         return;
     }
     s_last_steps = steps;
+    s_last_goal = goal;
     lv_label_set_text_fmt(s_steps, "%lu steps", (unsigned long)steps);
+
+    bool met = goal == 0 || steps >= goal;
+    int32_t filled = met ? GOAL_BAR_W : (int32_t)((uint64_t)steps * GOAL_BAR_W / goal);
+    lv_bar_set_value(s_goal_bar, filled, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(s_goal_bar, met ? COLOR_GOAL_MET : UI_COLOR_ACCENT, LV_PART_INDICATOR);
 }
 
 void watchface_set_time(const struct tm *t)

@@ -23,11 +23,14 @@
 #include "alarms.h"
 #include "haptics.h"
 #include "settings.h"
+#include "steps.h"
 #include "ui/flashlight.h"
 #include "ui/health_app.h"
 #include "ui/screens.h"
 #include "ui/settings_screen.h"
 #include "ui/watchface.h"
+#include "ui/weather_app.h"
+#include "weather.h"
 
 #define W            240
 #define H            240
@@ -175,6 +178,64 @@ void sim_on_media_command(phone_media_cmd_t cmd)
 
 // ---- The watch, roughly as main.c drives it ----
 
+static void on_weather_changed(void)
+{
+    watchface_set_weather(weather_get());
+    weather_app_refresh();
+}
+
+// What the companion app might send on a mild, partly cloudy morning.
+static void seed_weather(void)
+{
+    static weather_t w;
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_s(&tm, &now);
+    tm.tm_min = 0;
+    tm.tm_sec = 0;
+    time_t hour = mktime(&tm);
+    tm.tm_hour = 0;
+    time_t midnight = mktime(&tm);
+
+    w = (weather_t){
+        .updated = now - 12 * 60,
+        .has_coords = true,
+        .lat = 37.32f,
+        .lon = -122.03f,
+        .unit = 'F',
+        .temp = 68,
+        .feels = 66,
+        .code = 2,
+        .day = true,
+        .humidity = 54,
+        .wind = 9,
+        .high = 74,
+        .low = 55,
+        .precip = 20,
+        .uv = 6,
+        .aqi = 42,
+        .hour_count = WEATHER_HOURS,
+        .day_count = WEATHER_DAYS,
+    };
+    snprintf(w.location, sizeof(w.location), "Cupertino");
+    static const int16_t HOUR_TEMPS[WEATHER_HOURS] = {68, 70, 72, 73, 74, 73, 71, 68, 64, 61, 59, 58};
+    static const uint8_t HOUR_CODES[WEATHER_HOURS] = {2, 2, 1, 1, 3, 61, 61, 3, 2, 0, 0, 0};
+    for (int i = 0; i < WEATHER_HOURS; i++) {
+        w.hours[i] = (weather_hour_t){.time = hour + i * 3600, .temp = HOUR_TEMPS[i],
+                                      .code = HOUR_CODES[i], .precip = HOUR_CODES[i] == 61 ? 60 : 10};
+    }
+    static const int16_t HIGHS[WEATHER_DAYS] = {74, 69, 63, 66, 71, 75, 77};
+    static const int16_t LOWS[WEATHER_DAYS] = {55, 54, 50, 49, 52, 56, 58};
+    static const uint8_t DAY_CODES[WEATHER_DAYS] = {2, 63, 95, 3, 1, 0, 0};
+    for (int i = 0; i < WEATHER_DAYS; i++) {
+        w.days[i] = (weather_day_t){.time = midnight + i * 86400, .high = HIGHS[i], .low = LOWS[i],
+                                    .code = DAY_CODES[i], .precip = DAY_CODES[i] >= 60 ? 70 : 0};
+    }
+    w.sunrise = midnight + 7 * 3600;
+    w.sunset = midnight + 19 * 3600;
+    weather_set(&w);
+}
+
 static void refresh_watchface(void)
 {
     struct tm t;
@@ -186,7 +247,7 @@ static void refresh_watchface(void)
     }
     watchface_set_time(&t);
     watchface_set_power(76, false, false);
-    watchface_set_steps(4321);
+    watchface_set_steps(4321, steps_goal());
     watchface_set_connected(s_connected);
     watchface_set_alarm(alarms_any_enabled());
 }
@@ -226,7 +287,9 @@ static void app_init(void)
 {
     settings_init();
     alarms_init();
+    weather_init();
     ui_init();
+    weather_on_change(on_weather_changed);
     settings_on_change(apply_settings);
     settings_screen_on_forget(forget_phone);
     settings_screen_on_factory_reset(factory_reset);
@@ -490,6 +553,46 @@ static void release(void)
     advance(80);
 }
 
+// The apps-page cell for `name`, scrolled into view, whether or not it was visible.
+static lv_obj_t *show_app_cell(const char *name)
+{
+    ui_show_screen("apps", false);
+    advance(600);
+    lv_obj_t *stack[64];
+    int top = 0;
+    stack[top++] = lv_screen_active();
+    while (top > 0) {
+        lv_obj_t *obj = stack[--top];
+        if (lv_obj_check_type(obj, &lv_label_class) && strcmp(lv_label_get_text(obj), name) == 0) {
+            // Scroll only the apps page (cell -> grid -> page); scrolling further up moves the pager.
+            lv_obj_t *cell = lv_obj_get_parent(obj);
+            lv_obj_t *page = lv_obj_get_parent(lv_obj_get_parent(cell));
+            lv_area_t a;
+            lv_obj_get_coords(cell, &a);
+            lv_obj_scroll_by_bounded(page, 0, H / 2 - (a.y1 + a.y2) / 2, LV_ANIM_OFF);
+            return cell;
+        }
+        for (uint32_t i = 0; i < lv_obj_get_child_count(obj) && top < 64; i++) {
+            stack[top++] = lv_obj_get_child(obj, (int32_t)i);
+        }
+    }
+    printf("no app %s\n", name);
+    return NULL;
+}
+
+static bool open_app(const char *name)
+{
+    lv_obj_t *cell = show_app_cell(name);
+    if (!cell) {
+        return false;
+    }
+    lv_area_t a;
+    lv_obj_get_coords(lv_obj_get_child(cell, 0), &a);
+    tap_at((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);
+    advance(600);
+    return true;
+}
+
 static void tap(const char *label)
 {
     lv_obj_t *btn = find_button(lv_screen_active(), label);
@@ -582,6 +685,44 @@ static int run_shots(const char *dir)
     shot(dir, "30-calculator-result");
     ui_close_overlay();
     advance(600);
+
+    if (open_app("Weather")) {
+        shot(dir, "33-weather-empty");
+        seed_weather();
+        advance(100);
+        shot(dir, "34-weather");
+        lv_obj_scroll_by(lv_screen_active(), 0, -170, LV_ANIM_OFF);
+        shot(dir, "35-weather-details");
+        lv_obj_scroll_by(lv_screen_active(), 0, -150, LV_ANIM_OFF);
+        shot(dir, "38-weather-uv-aqi");
+        lv_obj_t *page = lv_screen_active();
+        lv_obj_scroll_to_view(lv_obj_get_child(page, (int32_t)lv_obj_get_child_count(page) - 1), LV_ANIM_OFF);
+        shot(dir, "36-weather-week");
+        lv_obj_scroll_to_view(lv_obj_get_child(page, (int32_t)lv_obj_get_child_count(page) - 2), LV_ANIM_OFF);
+        shot(dir, "39-weather-sun");
+        tap(LV_SYMBOL_REFRESH);
+        shot(dir, "37-weather-asking");
+        ui_close_overlay();
+        advance(600);
+        ui_show_home(false);
+        shot(dir, "31-watchface-weather");
+        ui_show_screen("apps", false);
+        advance(600);
+        show_app_cell("Moon");
+        shot(dir, "32-apps-weather");
+
+        if (open_app("Moon")) {
+            shot(dir, "40-moon");
+            lv_obj_scroll_by(lv_screen_active(), 0, -180, LV_ANIM_OFF);
+            shot(dir, "41-moon-week");
+            lv_obj_t *moon_page = lv_screen_active();
+            lv_obj_scroll_to_view(lv_obj_get_child(moon_page, (int32_t)lv_obj_get_child_count(moon_page) - 1),
+                                  LV_ANIM_OFF);
+            shot(dir, "42-moon-details");
+            ui_close_overlay();
+            advance(600);
+        }
+    }
     apps_on_show();
     tap(LV_SYMBOL_REFRESH);
     shot(dir, "06-timer");

@@ -17,8 +17,14 @@ typedef enum {
 // configures automatic light sleep. Interrupts are posted to `events`.
 esp_err_t board_init(QueueHandle_t events);
 
-// Sets both the RTC chip and the system clock. Times are local, with no time zone.
+// Sets both the RTC chip and the system clock from local time. The RTC keeps local time.
 void board_set_time(const struct tm *t);
+
+// The local time zone as a fixed offset from UTC (seconds east), from the companion app.
+// Until it's known the offset is 0, so time(NULL) is local time rather than true UTC.
+// Changing it keeps the local time the same and saves it for the next boot.
+void board_set_utc_offset(int32_t seconds);
+int32_t board_utc_offset(void);
 
 // Interrupt lines are level-triggered and disarm themselves when they fire.
 void board_rearm(board_event_t evt);

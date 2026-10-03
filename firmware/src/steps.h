@@ -31,3 +31,5 @@ uint32_t steps_average(int days, int *days_with_data);
 
 uint32_t steps_goal(void);
 void steps_set_goal(uint32_t goal);
+// Called after the goal changes.
+void steps_on_goal_change(void (*cb)(void));

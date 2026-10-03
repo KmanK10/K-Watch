@@ -300,6 +300,11 @@ void notify_remove(uint32_t uid)
     }
 }
 
+int notify_count(void)
+{
+    return s_count;
+}
+
 void notify_clear(void)
 {
     s_count = 0;

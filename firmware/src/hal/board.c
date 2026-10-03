@@ -1,8 +1,10 @@
 #include "board.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <time.h>
 
 #include "board_pins.h"
 #include "display.h"
@@ -15,6 +17,7 @@
 #include "haptics.h"
 #include "hwclock.h"
 #include "imu.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 #include "touch.h"
 
@@ -23,6 +26,7 @@ static const char *TAG = "board";
 static QueueHandle_t s_events;
 static esp_pm_lock_handle_t s_screen_lock;
 static bool s_imu_ok;
+static int32_t s_utc_offset;
 
 static gpio_num_t event_pin(board_event_t evt)
 {
@@ -93,6 +97,54 @@ static void set_build_time(struct tm *t)
     t->tm_isdst = -1;
 }
 
+static void apply_utc_offset(int32_t seconds)
+{
+    // POSIX counts the offset the other way: "LOC+7:00" is seven hours behind UTC.
+    int32_t a = seconds < 0 ? -seconds : seconds;
+    char tz[24];
+    snprintf(tz, sizeof(tz), "LOC%c%ld:%02ld", seconds <= 0 ? '+' : '-', (long)(a / 3600),
+             (long)(a % 3600 / 60));
+    setenv("TZ", tz, 1);
+    tzset();
+    s_utc_offset = seconds;
+}
+
+static void load_utc_offset(void)
+{
+    nvs_handle_t h;
+    int32_t seconds = 0;
+    if (nvs_open("clock", NVS_READONLY, &h) == ESP_OK) {
+        nvs_get_i32(h, "utc_offset", &seconds);
+        nvs_close(h);
+    }
+    apply_utc_offset(seconds);
+}
+
+void board_set_utc_offset(int32_t seconds)
+{
+    if (seconds == s_utc_offset || seconds < -14 * 3600 || seconds > 14 * 3600) {
+        return;
+    }
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    tv.tv_sec += s_utc_offset - seconds;
+    apply_utc_offset(seconds);
+    settimeofday(&tv, NULL);
+    ESP_LOGI(TAG, "UTC offset %+ld min", (long)(seconds / 60));
+
+    nvs_handle_t h;
+    if (nvs_open("clock", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_i32(h, "utc_offset", seconds);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+int32_t board_utc_offset(void)
+{
+    return s_utc_offset;
+}
+
 static void sync_clock_from_rtc(void)
 {
     struct tm build = {0};
@@ -147,6 +199,7 @@ esp_err_t board_init(QueueHandle_t events)
     s_imu_ok = imu_init() == ESP_OK;
     haptics_init();
 
+    load_utc_offset();
     sync_clock_from_rtc();
 
     ESP_ERROR_CHECK(gpio_install_isr_service(0));

@@ -1,9 +1,11 @@
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
 #include "alarms.h"
 #include "board.h"
+#include "companion_api.h"
 #include "display.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -29,6 +31,8 @@
 #include "ui/screens.h"
 #include "ui/settings_screen.h"
 #include "ui/watchface.h"
+#include "ui/weather_app.h"
+#include "weather.h"
 
 #define NOTIFY_TIMEOUT_MS  10000
 #define ALERT_TIMEOUT_MS   60000
@@ -37,6 +41,7 @@
 #define NO_TIMEOUT         UINT32_MAX
 // Steps add up silently while the screen is off, so look at the goal this often until it's met.
 #define GOAL_CHECK_TICKS   pdMS_TO_TICKS(60 * 1000)
+#define WEATHER_SHOW_MAX_S (6 * 3600)
 
 static const char *TAG = "k-watch";
 
@@ -51,6 +56,25 @@ static bool s_goal_reached;
 static uint32_t s_timeout_ms;
 static int64_t s_screen_on_since_us;
 
+// The watch face hides weather this old rather than show a forecast that's long out of date.
+static void update_weather(bool changed)
+{
+    static bool s_shown;
+    const weather_t *w = weather_get();
+    bool show = w && weather_age_s() < WEATHER_SHOW_MAX_S;
+    if (show == s_shown && !changed) {
+        return;
+    }
+    s_shown = show;
+    watchface_set_weather(show ? w : NULL);
+}
+
+static void on_weather_changed(void)
+{
+    update_weather(true);
+    weather_app_refresh();
+}
+
 static void refresh_ui(void)
 {
     time_t now = time(NULL);
@@ -61,8 +85,9 @@ static void refresh_ui(void)
     pmu_status_t p;
     pmu_get_status(&p);
     watchface_set_power(p.battery_percent, p.charging, p.usb_connected);
-    watchface_set_steps(steps_today());
+    watchface_set_steps(steps_today(), steps_goal());
     watchface_set_alarm(alarms_any_enabled());
+    update_weather(false);
 }
 
 static void refresh_timer_cb(lv_timer_t *timer)
@@ -222,6 +247,10 @@ static void handle_phone_event(const phone_event_t *evt)
         // Read or dismissed on the phone, so drop it here too.
         notify_remove(evt->uid);
         break;
+    case PHONE_EVT_COMPANION:
+        companion_api_handle(evt->message);
+        free(evt->message);
+        break;
     case PHONE_EVT_MEDIA:
         music_update(&evt->media);
         break;
@@ -279,6 +308,7 @@ static void apply_settings(const settings_t *s)
     if (s_screen_on && s_timeout_ms != NO_TIMEOUT) {
         s_timeout_ms = s->screen_timeout_s * 1000;
     }
+    companion_api_settings_changed();
 }
 
 static void stop_alarm(void)
@@ -348,6 +378,18 @@ static void check_step_goal(void)
     haptics_play(HAPTIC_NOTIFY);
 }
 
+static void ask_for_weather(void)
+{
+    companion_api_request_weather("user");
+}
+
+// "Find my watch" from the companion app.
+static void find_watch(void)
+{
+    screen_on();
+    haptics_play(HAPTIC_ALERT);
+}
+
 static void erase_and_restart(lv_timer_t *t)
 {
     (void)t;
@@ -379,12 +421,18 @@ void app_main(void)
     s_goal_reached = steps_today() >= steps_goal();
     settings_init();
     alarms_init();
+    weather_init();
+    companion_api_init();
 
     ui_init();
     apply_settings(settings_get());
     settings_on_change(apply_settings);
     settings_screen_on_forget(phone_forget);
     settings_screen_on_factory_reset(factory_reset);
+    weather_on_change(on_weather_changed);
+    weather_app_on_refresh(ask_for_weather);
+    companion_api_on_find(find_watch);
+    steps_on_goal_change(companion_api_settings_changed);
     flashlight_on_change(on_flashlight);
     char about[96];
     const char *restart = abnormal_restart_reason();

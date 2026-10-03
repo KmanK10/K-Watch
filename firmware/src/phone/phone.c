@@ -8,6 +8,7 @@
 // request is ever outstanding.
 
 #include "phone.h"
+#include "companion.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -929,6 +930,7 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
 {
     (void)arg;
     struct ble_gap_conn_desc desc;
+    companion_gap_event(ev);
 
     switch (ev->type) {
     case BLE_GAP_EVENT_CONNECT:
@@ -1050,6 +1052,9 @@ static void advertise(bool fast)
         .name = (const uint8_t *)name,
         .name_len = strlen(name),
         .name_is_complete = 1,
+        // Lets the companion app find the watch by scanning when it isn't already connected.
+        .uuids128 = &COMPANION_SVC_UUID,
+        .num_uuids128 = 1,
     };
     ble_gap_adv_rsp_set_fields(&rsp);
 
@@ -1079,6 +1084,25 @@ static void on_sync(void)
 static void on_reset(int reason)
 {
     ESP_LOGW(TAG, "Bluetooth reset, reason %d", reason);
+}
+
+static void on_companion_message(char *json)
+{
+    phone_event_t evt = {.type = PHONE_EVT_COMPANION, .message = json};
+    if (xQueueSend(s_events, &evt, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "event queue full, dropped a companion message");
+        free(json);
+    }
+}
+
+bool phone_companion_send(const char *json)
+{
+    return companion_send(json);
+}
+
+bool phone_companion_ready(void)
+{
+    return companion_ready();
 }
 
 static void host_task(void *param)
@@ -1114,6 +1138,7 @@ esp_err_t phone_init(QueueHandle_t events)
 
     ble_svc_gap_init();
     ble_svc_gatt_init();
+    companion_register(on_companion_message);
     ble_store_config_init();
 
     nimble_port_freertos_init(host_task);

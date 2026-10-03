@@ -13,7 +13,10 @@
 #include "ui/health_app.h"
 #include "ui/screens.h"
 #include "ui/stopwatch.h"
+#include "ui/moon_app.h"
 #include "ui/theme.h"
+#include "ui/weather_app.h"
+#include "ui/weather_icon.h"
 
 #define ICON_SIZE   60
 #define CELL_W      78
@@ -21,22 +24,32 @@
 
 typedef struct {
     const char *name;
-    const char *icon;                    // an LV_SYMBOL_*
+    const char *icon;                    // an LV_SYMBOL_*, or "" when draw_icon draws it
+    void (*draw_icon)(lv_obj_t *button);
     uint32_t color;
     void (*create)(lv_obj_t *parent);    // builds the app into its own screen, the first time it opens
     void (*on_show)(void);               // optional, called each time it opens
     const char *screen;                  // instead of `create`: a swipe screen from the table in screens.c
 } app_t;
 
+static void draw_weather_icon(lv_obj_t *button)
+{
+    lv_obj_t *icon = weather_icon_create(button, 40);
+    weather_icon_set(icon, 2, true);
+    lv_obj_center(icon);
+}
+
 static const app_t s_apps[] = {
-    {"Flashlight", LV_SYMBOL_CHARGE, 0xFFC107, flashlight_create, flashlight_on_show, NULL},
-    {"Alarms", LV_SYMBOL_BELL, 0x7E57C2, alarm_app_create, alarm_app_on_show, NULL},
-    {"Timer", LV_SYMBOL_REFRESH, 0xFF5F1F, countdown_create, NULL, NULL},
-    {"Stopwatch", LV_SYMBOL_LOOP, 0x2EBD59, stopwatch_create, stopwatch_on_show, NULL},
-    {"Health", LV_SYMBOL_PLUS, 0xEC407A, health_app_create, health_app_on_show, NULL},
-    {"Calculator", LV_SYMBOL_KEYBOARD, 0x1E88E5, calculator_create, NULL, NULL},
-    {"Music", LV_SYMBOL_AUDIO, 0xE53950, NULL, NULL, "music"},
-    {"Settings", LV_SYMBOL_SETTINGS, 0x707070, NULL, NULL, "settings"},
+    {"Flashlight", LV_SYMBOL_CHARGE, NULL, 0xFFC107, flashlight_create, flashlight_on_show, NULL},
+    {"Alarms", LV_SYMBOL_BELL, NULL, 0x7E57C2, alarm_app_create, alarm_app_on_show, NULL},
+    {"Timer", LV_SYMBOL_REFRESH, NULL, 0xFF5F1F, countdown_create, NULL, NULL},
+    {"Stopwatch", LV_SYMBOL_LOOP, NULL, 0x2EBD59, stopwatch_create, stopwatch_on_show, NULL},
+    {"Health", LV_SYMBOL_PLUS, NULL, 0xEC407A, health_app_create, health_app_on_show, NULL},
+    {"Calculator", LV_SYMBOL_KEYBOARD, NULL, 0x1E88E5, calculator_create, NULL, NULL},
+    {"Weather", "", draw_weather_icon, 0x29B6F6, weather_app_create, weather_app_on_show, NULL},
+    {"Moon", "", moon_app_draw_icon, 0x283593, moon_app_create, moon_app_on_show, NULL},
+    {"Music", LV_SYMBOL_AUDIO, NULL, 0xE53950, NULL, NULL, "music"},
+    {"Settings", LV_SYMBOL_SETTINGS, NULL, 0x707070, NULL, NULL, "settings"},
 };
 #define APP_COUNT (sizeof(s_apps) / sizeof(s_apps[0]))
 
@@ -184,6 +197,9 @@ static void add_app(lv_obj_t *grid, size_t i)
     lv_obj_set_user_data(cell, (void *)(uintptr_t)i);
 
     lv_obj_t *btn = ui_round_button(cell, s_apps[i].icon, ICON_SIZE, lv_color_hex(s_apps[i].color));
+    if (s_apps[i].draw_icon) {
+        s_apps[i].draw_icon(btn);
+    }
     lv_obj_set_gesture_bubble(btn, true);
     lv_obj_set_style_outline_color(btn, lv_color_white(), 0);
     lv_obj_set_style_transform_pivot_x(btn, ICON_SIZE / 2, 0);
