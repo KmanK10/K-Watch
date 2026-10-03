@@ -193,6 +193,8 @@ static void handle_weather_set(const cJSON *req, int id)
     }
     const cJSON *unit = cJSON_GetObjectItemCaseSensitive(in, "unit");
     w.unit = cJSON_IsString(unit) && unit->valuestring[0] == 'C' ? 'C' : 'F';
+    const cJSON *wind_unit = cJSON_GetObjectItemCaseSensitive(in, "wind_unit");
+    w.wind_kmh = cJSON_IsString(wind_unit) ? strcmp(wind_unit->valuestring, "kmh") == 0 : w.unit == 'C';
 
     const cJSON *now = cJSON_GetObjectItemCaseSensitive(in, "now");
     w.temp = get_int16(now, "temp");
@@ -255,6 +257,13 @@ static cJSON *settings_json(void)
     cJSON_AddBoolToObject(o, "dnd", s->dnd);
     cJSON_AddBoolToObject(o, "bluetooth", s->bluetooth);
     cJSON_AddNumberToObject(o, "step_goal", steps_goal());
+    cJSON_AddStringToObject(o, "temp_unit", s->celsius ? "C" : "F");
+    cJSON_AddStringToObject(o, "wind_unit", s->wind_kmh ? "kmh" : "mph");
+    cJSON_AddBoolToObject(o, "sleep_mode", s->sleep_mode);
+    cJSON_AddStringToObject(o, "sleep_color", s->sleep_green ? "green" : "red");
+    cJSON_AddBoolToObject(o, "sleep_schedule", s->sleep_schedule);
+    cJSON_AddNumberToObject(o, "sleep_start", s->sleep_start);
+    cJSON_AddNumberToObject(o, "sleep_end", s->sleep_end);
     return o;
 }
 
@@ -299,6 +308,26 @@ static void handle_settings_set(const cJSON *req, int id)
     read_bool(in, "touch_feedback", &s.touch_feedback);
     read_bool(in, "clock_24h", &s.clock_24h);
     read_bool(in, "dnd", &s.dnd);
+    const cJSON *temp_unit = cJSON_GetObjectItemCaseSensitive(in, "temp_unit");
+    if (cJSON_IsString(temp_unit)) {
+        s.celsius = temp_unit->valuestring[0] == 'C';
+    }
+    const cJSON *wind_unit = cJSON_GetObjectItemCaseSensitive(in, "wind_unit");
+    if (cJSON_IsString(wind_unit)) {
+        s.wind_kmh = strcmp(wind_unit->valuestring, "kmh") == 0;
+    }
+    read_bool(in, "sleep_mode", &s.sleep_mode);
+    const cJSON *sleep_color = cJSON_GetObjectItemCaseSensitive(in, "sleep_color");
+    if (cJSON_IsString(sleep_color)) {
+        s.sleep_green = strcmp(sleep_color->valuestring, "green") == 0;
+    }
+    read_bool(in, "sleep_schedule", &s.sleep_schedule);
+    if (get_number(in, "sleep_start", &v) && v >= 0 && v < 24 * 60) {
+        s.sleep_start = (uint16_t)v;
+    }
+    if (get_number(in, "sleep_end", &v) && v >= 0 && v < 24 * 60) {
+        s.sleep_end = (uint16_t)v;
+    }
 
     s_applying_settings = true;
     settings_update(&s);

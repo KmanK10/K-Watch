@@ -1,7 +1,8 @@
 #pragma once
 
 // The latest weather sent by the companion app, kept in flash so it survives a restart.
-// Values are already in the user's units; `unit` says which ('F' or 'C').
+// weather_get converts it to the units chosen with weather_set_units; `unit` and `wind_kmh`
+// say which units a weather_t is in.
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -38,7 +39,8 @@ typedef struct {
     uint8_t code;
     bool day;              // false at night
     int8_t humidity;       // percent, -1 if unknown
-    int16_t wind;          // mph with 'F', km/h with 'C'
+    bool wind_kmh;         // `wind` is in km/h; mph when false
+    int16_t wind;
     int16_t high;
     int16_t low;
     int8_t precip;
@@ -56,6 +58,9 @@ void weather_init(void);
 
 // NULL until the app has sent weather at least once.
 const weather_t *weather_get(void);
+
+// The units weather_get returns. Tells the change listener if they changed.
+void weather_set_units(bool celsius, bool wind_kmh);
 
 // Saves it and tells the change listener. Call from the main task.
 void weather_set(const weather_t *w);

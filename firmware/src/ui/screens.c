@@ -8,7 +8,7 @@
 #include "ui/apps.h"
 #include "ui/music.h"
 #include "ui/notify.h"
-#include "ui/settings_screen.h"
+#include "ui/quick_settings.h"
 #include "ui/theme.h"
 #include "ui/watchface.h"
 
@@ -23,13 +23,14 @@ typedef struct {
 } ui_screen_t;
 
 // From the watch face: swipe right for apps, left for music, up for notifications and
-// down for settings. Everything else opens from the apps page. The home screen must stay first.
+// down for quick settings. Everything else, including the full Settings, opens from the apps
+// page. The home screen must stay first.
 static const ui_screen_t s_screens[] = {
     {"watch face", 0, 0, watchface_create, NULL},
     {"apps", -1, 0, apps_create, apps_on_show},
     {"music", 1, 0, music_create, NULL},
     {"notifications", 0, 1, notify_list_create, notify_list_on_show},
-    {"settings", 0, -1, settings_screen_create, settings_screen_on_show},
+    {"quick settings", 0, -1, quick_settings_create, quick_settings_on_show},
 };
 #define SCREEN_COUNT (sizeof(s_screens) / sizeof(s_screens[0]))
 #define HOME 0

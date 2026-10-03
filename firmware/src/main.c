@@ -20,6 +20,7 @@
 #include "pmu.h"
 #include "esp_app_desc.h"
 #include "settings.h"
+#include "sleep_schedule.h"
 #include "steps.h"
 #include "ui/alert.h"
 #include "ui/countdown.h"
@@ -29,7 +30,9 @@
 #include "ui/notify.h"
 #include "ui/pairing.h"
 #include "ui/screens.h"
+#include "ui/quick_settings.h"
 #include "ui/settings_screen.h"
+#include "ui/tint.h"
 #include "ui/watchface.h"
 #include "ui/weather_app.h"
 #include "weather.h"
@@ -42,6 +45,7 @@
 // Steps add up silently while the screen is off, so look at the goal this often until it's met.
 #define GOAL_CHECK_TICKS   pdMS_TO_TICKS(60 * 1000)
 #define WEATHER_SHOW_MAX_S (6 * 3600)
+#define SLEEP_BRIGHTNESS   10   // percent, or less if the normal brightness is lower
 
 static const char *TAG = "k-watch";
 
@@ -55,6 +59,37 @@ static bool s_alarm_ringing;
 static bool s_goal_reached;
 static uint32_t s_timeout_ms;
 static int64_t s_screen_on_since_us;
+static bool s_lock_wanted;   // touch lock or sleep mode is on
+static bool s_unlocked;      // the button unlocked touch until the screen next turns off
+static bool s_touch_locked;
+
+static bool quiet(void)
+{
+    return settings_get()->dnd || settings_get()->sleep_mode;
+}
+
+static uint8_t normal_brightness(void)
+{
+    const settings_t *s = settings_get();
+    return s->sleep_mode && s->brightness > SLEEP_BRIGHTNESS ? SLEEP_BRIGHTNESS : s->brightness;
+}
+
+// Alarms, timers and the pairing code always take touches, so they can be answered.
+static void update_touch_lock(void)
+{
+    bool locked = s_lock_wanted && !s_unlocked && !alert_is_showing() && !pairing_is_showing();
+    if (locked != s_touch_locked) {
+        s_touch_locked = locked;
+        display_set_touch_locked(locked);
+        watchface_set_locked(locked);
+    }
+}
+
+static void go_home(void *arg)
+{
+    (void)arg;
+    ui_show_home(false);
+}
 
 // The watch face hides weather this old rather than show a forecast that's long out of date.
 static void update_weather(bool changed)
@@ -134,7 +169,10 @@ static void screen_off(void)
     // The next wake should show the time, not an old notification or alert.
     alert_dismiss();
     ui_show_home(false);
-    board_set_touch_wake(settings_get()->tap_to_wake);
+    s_unlocked = false;
+    update_touch_lock();
+    // While locked, a touch still wakes the watch face; that's all it does.
+    board_set_touch_wake(settings_get()->tap_to_wake || s_lock_wanted);
     board_set_screen_awake(false);
     phone_set_interactive(false);
     steps_save(false);
@@ -147,12 +185,18 @@ static void handle_pmu(void)
     uint32_t evt = pmu_read_events();
     board_rearm(BOARD_EVT_PMU);
 
+    // The button unlocks touch until the screen goes off: by waking it, or with a press while locked.
     if (evt & PMU_EVT_BUTTON_SHORT) {
-        if (s_screen_on) {
-            screen_off();
-        } else {
+        if (!s_screen_on) {
+            s_unlocked = true;
             screen_on();
+        } else if (s_touch_locked) {
+            s_unlocked = true;
+            display_trigger_activity();
+        } else {
+            screen_off();
         }
+        update_touch_lock();
     }
     if (evt & (PMU_EVT_USB_IN | PMU_EVT_CHARGE_START)) {
         screen_on();
@@ -167,7 +211,8 @@ static void handle_imu(void)
     uint32_t evt = imu_read_events();
     board_rearm(BOARD_EVT_IMU);
 
-    if ((evt & IMU_EVT_WRIST_TILT) && settings_get()->raise_to_wake && !s_screen_on) {
+    if ((evt & IMU_EVT_WRIST_TILT) && settings_get()->raise_to_wake && !settings_get()->sleep_mode &&
+        !s_screen_on) {
         ESP_LOGI(TAG, "wrist tilt");
         screen_on();
     }
@@ -230,8 +275,8 @@ static void handle_phone_event(const phone_event_t *evt)
         const phone_notification_t *n = &evt->notification;
         notify_add(n);
         // Silent means the phone didn't alert either (Focus, Do Not Disturb, or the app's
-        // sounds are off), so it waits quietly in the list. The watch's own DND does the same.
-        if (n->pre_existing || n->silent || settings_get()->dnd || pairing_is_showing() ||
+        // sounds are off), so it waits quietly in the list. The watch's own DND and sleep mode do the same.
+        if (n->pre_existing || n->silent || quiet() || pairing_is_showing() ||
             alert_is_showing() || flashlight_is_on()) {
             break;
         }
@@ -280,7 +325,13 @@ static TickType_t run_screen(void)
     if (!s_screen_on) {
         return portMAX_DELAY;
     }
+    update_touch_lock();
     uint32_t next_ms = display_run();
+    if (display_take_locked_touch()) {
+        display_trigger_activity();
+        ui_show_home(false);
+        watchface_show_unlock_hint();
+    }
     if (s_timeout_ms == NO_TIMEOUT) {
         return pdMS_TO_TICKS(next_ms) > 0 ? pdMS_TO_TICKS(next_ms) : 1;
     }
@@ -300,11 +351,23 @@ static TickType_t run_screen(void)
 // Wake options take effect the next time the screen turns off.
 static void apply_settings(const settings_t *s)
 {
-    display_set_brightness(s->brightness);
+    if (!flashlight_is_on()) {
+        display_set_brightness(normal_brightness());
+    }
+    tint_set(!s->sleep_mode ? TINT_NONE : s->sleep_green ? TINT_GREEN : TINT_RED);
+    bool lock = s->touch_lock || s->sleep_mode;
+    if (lock && !s_lock_wanted) {
+        // Locks straight away, on the watch face, even if the button unlocked touch earlier.
+        s_unlocked = false;
+        lv_async_call(go_home, NULL);
+    }
+    s_lock_wanted = lock;
+    update_touch_lock();
     watchface_set_24h(s->clock_24h);
     watchface_set_dnd(s->dnd);
     phone_set_enabled(s->bluetooth);
     haptics_set_touch_feedback(s->touch_feedback);
+    weather_set_units(s->celsius, s->wind_kmh);
     if (s_screen_on && s_timeout_ms != NO_TIMEOUT) {
         s_timeout_ms = s->screen_timeout_s * 1000;
     }
@@ -351,7 +414,7 @@ static const char *abnormal_restart_reason(void)
 // percent is 0 when the flashlight turns off.
 static void on_flashlight(uint8_t percent)
 {
-    display_set_brightness(percent ? percent : settings_get()->brightness);
+    display_set_brightness(percent ? percent : normal_brightness());
     if (s_screen_on) {
         s_timeout_ms = percent ? FLASHLIGHT_TIMEOUT_MS : settings_get()->screen_timeout_s * 1000;
     }
@@ -369,7 +432,7 @@ static void check_step_goal(void)
     s_goal_reached = true;
     ESP_LOGI(TAG, "step goal reached");
     // Lowering the goal in the Health app shouldn't throw a party over the top of it.
-    if (settings_get()->dnd || health_app_is_showing() || alert_is_showing() || pairing_is_showing() ||
+    if (quiet() || health_app_is_showing() || alert_is_showing() || pairing_is_showing() ||
         flashlight_is_on()) {
         return;
     }
@@ -396,6 +459,20 @@ static void erase_and_restart(lv_timer_t *t)
     ESP_LOGW(TAG, "factory reset");
     nvs_flash_erase();
     esp_restart();
+}
+
+static void power_off_now(lv_timer_t *t)
+{
+    (void)t;
+    pmu_power_off();
+}
+
+static void power_off(void)
+{
+    steps_save(true);
+    // Long enough for "Bye" to be drawn.
+    lv_timer_t *t = lv_timer_create(power_off_now, 300, NULL);
+    lv_timer_set_repeat_count(t, 1);
 }
 
 // Wipes settings, alarms, steps, the app order and the iPhone pairing, then starts fresh.
@@ -429,6 +506,7 @@ void app_main(void)
     settings_on_change(apply_settings);
     settings_screen_on_forget(phone_forget);
     settings_screen_on_factory_reset(factory_reset);
+    quick_settings_on_power_off(power_off);
     weather_on_change(on_weather_changed);
     weather_app_on_refresh(ask_for_weather);
     companion_api_on_find(find_watch);
@@ -445,7 +523,10 @@ void app_main(void)
     }
     settings_screen_set_about(about);
     lv_timer_create(refresh_timer_cb, 1000, NULL);
+    sleep_schedule_check();
+    s_unlocked = true;   // a fresh start isn't something to lock you out of
     screen_on();
+    update_touch_lock();
 
     if (phone_init(s_phone_events) != ESP_OK) {
         ESP_LOGE(TAG, "running without Bluetooth");
@@ -459,10 +540,15 @@ void app_main(void)
         wait = until_timer < wait ? until_timer : wait;
         TickType_t until_alarm = alarms_ticks_until_next();
         wait = until_alarm < wait ? until_alarm : wait;
+        uint32_t until_sleep_s = sleep_schedule_seconds_until_next();
+        if (until_sleep_s != UINT32_MAX && (TickType_t)until_sleep_s * configTICK_RATE_HZ < wait) {
+            wait = (TickType_t)until_sleep_s * configTICK_RATE_HZ;
+        }
         if (!s_goal_reached && GOAL_CHECK_TICKS < wait) {
             wait = GOAL_CHECK_TICKS;
         }
         QueueSetMemberHandle_t ready = xQueueSelectFromSet(s_event_set, wait);
+        sleep_schedule_check();
         steps_check_day();
         check_step_goal();
         if (countdown_check_done()) {

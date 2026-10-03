@@ -194,7 +194,7 @@ static void add_details(const weather_t *w)
         row = add_detail(c, row, "Humidity", buf);
     }
     if (w->wind != WEATHER_UNKNOWN) {
-        snprintf(buf, sizeof(buf), "%d %s", w->wind, w->unit == 'C' ? "km/h" : "mph");
+        snprintf(buf, sizeof(buf), "%d %s", w->wind, w->wind_kmh ? "km/h" : "mph");
         row = add_detail(c, row, "Wind", buf);
     }
     if (w->precip >= 0) {
@@ -449,6 +449,70 @@ static void add_sun(const weather_t *w)
     add_sun_time(c, 1, 1, "Dusk", COLOR_TWILIGHT, sun.dusk);
 }
 
+#define UNIT_ROW_H     40
+#define UNIT_BTN_W     46
+#define UNIT_BTN_H     28
+
+typedef enum {
+    UNIT_FAHRENHEIT,
+    UNIT_CELSIUS,
+    UNIT_MPH,
+    UNIT_KMH,
+} unit_choice_t;
+
+// The change rebuilds this page, so it waits until the tap is done with its button.
+static void apply_unit(void *arg)
+{
+    settings_t s = *settings_get();
+    switch ((unit_choice_t)(uintptr_t)arg) {
+    case UNIT_FAHRENHEIT: s.celsius = false; break;
+    case UNIT_CELSIUS: s.celsius = true; break;
+    case UNIT_MPH: s.wind_kmh = false; break;
+    case UNIT_KMH: s.wind_kmh = true; break;
+    }
+    settings_update(&s);
+}
+
+static void on_unit(lv_event_t *e)
+{
+    lv_async_call(apply_unit, lv_event_get_user_data(e));
+}
+
+static void add_unit_button(lv_obj_t *c, int32_t x, int32_t y, const char *text, unit_choice_t choice, bool selected)
+{
+    lv_obj_t *btn = lv_button_create(c);
+    lv_obj_remove_style_all(btn);
+    lv_obj_set_size(btn, UNIT_BTN_W, UNIT_BTN_H);
+    lv_obj_align(btn, LV_ALIGN_TOP_RIGHT, x, y);
+    lv_obj_set_style_radius(btn, UNIT_BTN_H / 2, 0);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(btn, selected ? UI_COLOR_ACCENT : lv_color_hex(0x484848), 0);
+    lv_obj_set_gesture_bubble(btn, true);
+    lv_obj_add_event_cb(btn, on_unit, LV_EVENT_CLICKED, (void *)(uintptr_t)choice);
+    lv_obj_t *label = ui_label(btn, &lv_font_montserrat_14, lv_color_white());
+    lv_label_set_text(label, text);
+    lv_obj_center(label);
+}
+
+static void add_unit_row(lv_obj_t *c, int row, const char *name, const char *a, unit_choice_t a_choice,
+                         const char *b, unit_choice_t b_choice, bool b_selected)
+{
+    int32_t y = 8 + row * UNIT_ROW_H;
+    lv_obj_t *label = ui_label(c, &lv_font_montserrat_16, lv_color_white());
+    lv_label_set_text(label, name);
+    lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, y + (UNIT_BTN_H - 18) / 2);
+    add_unit_button(c, -(UNIT_BTN_W + 6), y, a, a_choice, !b_selected);
+    add_unit_button(c, 0, y, b, b_choice, b_selected);
+}
+
+static void add_units(void)
+{
+    const settings_t *s = settings_get();
+    lv_obj_t *c = card(16 + 2 * UNIT_ROW_H - (UNIT_ROW_H - UNIT_BTN_H));
+    add_unit_row(c, 0, "Temp", "F", UNIT_FAHRENHEIT, "C", UNIT_CELSIUS, s->celsius);
+    add_unit_row(c, 1, "Wind", "mph", UNIT_MPH, "km/h", UNIT_KMH, s->wind_kmh);
+}
+
 static void add_days(const weather_t *w)
 {
     for (int i = 0; i < w->day_count; i++) {
@@ -503,6 +567,7 @@ static void build(void)
     add_gauges(w);
     add_days(w);
     add_sun(w);
+    add_units();
     add_refresh_row(w);
 }
 
@@ -528,7 +593,10 @@ void weather_app_on_show(void)
 void weather_app_refresh(void)
 {
     if (s_page && lv_screen_active() == lv_obj_get_screen(s_page)) {
+        int32_t y = lv_obj_get_scroll_y(s_page);
         build();
+        lv_obj_update_layout(s_page);
+        lv_obj_scroll_to_y(s_page, y, LV_ANIM_OFF);
     }
 }
 

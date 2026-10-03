@@ -1,9 +1,11 @@
 #include "settings_screen.h"
 
 #include <stddef.h>
+#include <stdio.h>
 
 #include "settings.h"
 #include "ui/theme.h"
+#include "ui/time_picker.h"
 
 #define CONTENT_W          200
 #define ROW_H              44
@@ -18,6 +20,11 @@ static const uint8_t TIMEOUT_STEPS[] = {5, 10, 15, 30};
 typedef enum {
     ROW_BRIGHTNESS,
     ROW_TIMEOUT,
+    ROW_SLEEP_COLOR,
+    ROW_SLEEP_START,
+    ROW_SLEEP_END,
+    ROW_SLEEP_MODE,
+    ROW_SLEEP_SCHEDULE,
     ROW_RAISE_TO_WAKE,
     ROW_TAP_TO_WAKE,
     ROW_NOTIFY_VIBRATE,
@@ -32,6 +39,7 @@ static lv_obj_t *s_page;
 static lv_obj_t *s_values[ROW_COUNT];   // value label or switch
 static lv_obj_t *s_brightness_slider;
 static lv_obj_t *s_about;
+static char s_about_text[96];
 
 // A red row that needs a second tap within CONFIRM_MS before it acts.
 typedef struct {
@@ -67,6 +75,8 @@ static uint8_t next_step(const uint8_t *steps, size_t count, uint8_t current)
 static bool *toggle_field(settings_t *s, row_id_t row)
 {
     switch (row) {
+    case ROW_SLEEP_MODE: return &s->sleep_mode;
+    case ROW_SLEEP_SCHEDULE: return &s->sleep_schedule;
     case ROW_RAISE_TO_WAKE: return &s->raise_to_wake;
     case ROW_TAP_TO_WAKE: return &s->tap_to_wake;
     case ROW_NOTIFY_VIBRATE: return &s->notify_vibrate;
@@ -78,23 +88,67 @@ static bool *toggle_field(settings_t *s, row_id_t row)
     }
 }
 
+static void format_time(char *buf, size_t len, uint16_t minutes, bool h24)
+{
+    int hour = minutes / 60, minute = minutes % 60;
+    if (h24) {
+        snprintf(buf, len, "%02d:%02d", hour, minute);
+    } else {
+        snprintf(buf, len, "%d:%02d %s", hour % 12 == 0 ? 12 : hour % 12, minute, hour < 12 ? "AM" : "PM");
+    }
+}
+
 static void refresh(void)
 {
     settings_t s = *settings_get();
     lv_label_set_text_fmt(s_values[ROW_BRIGHTNESS], "%d%%", s.brightness);
     lv_slider_set_value(s_brightness_slider, s.brightness, LV_ANIM_OFF);
     lv_label_set_text_fmt(s_values[ROW_TIMEOUT], "%d s", s.screen_timeout_s);
-    for (row_id_t row = ROW_RAISE_TO_WAKE; row < ROW_COUNT; row++) {
+    lv_label_set_text(s_values[ROW_SLEEP_COLOR], s.sleep_green ? "Green" : "Red");
+    char buf[16];
+    format_time(buf, sizeof(buf), s.sleep_start, s.clock_24h);
+    lv_label_set_text(s_values[ROW_SLEEP_START], buf);
+    format_time(buf, sizeof(buf), s.sleep_end, s.clock_24h);
+    lv_label_set_text(s_values[ROW_SLEEP_END], buf);
+    lv_obj_set_hidden(lv_obj_get_parent(s_values[ROW_SLEEP_START]), !s.sleep_schedule);
+    lv_obj_set_hidden(lv_obj_get_parent(s_values[ROW_SLEEP_END]), !s.sleep_schedule);
+    for (row_id_t row = ROW_SLEEP_MODE; row < ROW_COUNT; row++) {
         lv_obj_set_state(s_values[row], LV_STATE_CHECKED, *toggle_field(&s, row));
     }
+}
+
+static void set_sleep_start(uint16_t minutes)
+{
+    settings_t s = *settings_get();
+    s.sleep_start = minutes;
+    settings_update(&s);
+    refresh();
+}
+
+static void set_sleep_end(uint16_t minutes)
+{
+    settings_t s = *settings_get();
+    s.sleep_end = minutes;
+    settings_update(&s);
+    refresh();
 }
 
 static void on_row(lv_event_t *e)
 {
     row_id_t row = (row_id_t)(uintptr_t)lv_event_get_user_data(e);
     settings_t s = *settings_get();
+    if (row == ROW_SLEEP_START) {
+        time_picker_open("Sleep starts", s.sleep_start, set_sleep_start);
+        return;
+    }
+    if (row == ROW_SLEEP_END) {
+        time_picker_open("Sleep ends", s.sleep_end, set_sleep_end);
+        return;
+    }
     if (row == ROW_TIMEOUT) {
         s.screen_timeout_s = next_step(TIMEOUT_STEPS, sizeof(TIMEOUT_STEPS), s.screen_timeout_s);
+    } else if (row == ROW_SLEEP_COLOR) {
+        s.sleep_green = !s.sleep_green;
     } else {
         bool *field = toggle_field(&s, row);
         *field = !*field;
@@ -228,7 +282,9 @@ static void add_confirm_row(confirm_row_t *c)
 void settings_screen_create(lv_obj_t *parent)
 {
     s_page = parent;
+    lv_obj_set_scrollable(s_page, true);
     lv_obj_set_scroll_dir(s_page, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(s_page, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_pad_top(s_page, 16, 0);
     lv_obj_set_style_pad_bottom(s_page, 24, 0);
     lv_obj_set_style_pad_row(s_page, 8, 0);
@@ -248,12 +304,23 @@ void settings_screen_create(lv_obj_t *parent)
     add_toggle_row("Touch feedback", ROW_TOUCH_FEEDBACK);
     add_toggle_row("24-hour clock", ROW_CLOCK_24H);
 
+    lv_obj_t *sleep_heading = ui_label(s_page, &lv_font_montserrat_14, UI_COLOR_DIM);
+    lv_label_set_text(sleep_heading, "Sleep");
+    lv_obj_set_width(sleep_heading, CONTENT_W - 24);
+    lv_obj_set_style_pad_top(sleep_heading, 8, 0);
+    add_toggle_row("Sleep mode", ROW_SLEEP_MODE);
+    add_value_row("Colour", ROW_SLEEP_COLOR);
+    add_toggle_row("Schedule", ROW_SLEEP_SCHEDULE);
+    add_value_row("Starts", ROW_SLEEP_START);
+    add_value_row("Ends", ROW_SLEEP_END);
+
     add_confirm_row(&s_forget);
     add_confirm_row(&s_reset);
 
     s_about = ui_label(s_page, &lv_font_montserrat_14, UI_COLOR_DIM);
     lv_obj_set_width(s_about, CONTENT_W);
     lv_obj_set_style_text_align(s_about, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_about, s_about_text);
 
     refresh();
 }
@@ -266,7 +333,10 @@ void settings_screen_on_show(void)
 
 void settings_screen_set_about(const char *text)
 {
-    lv_label_set_text(s_about, text);
+    snprintf(s_about_text, sizeof(s_about_text), "%s", text);
+    if (s_about) {
+        lv_label_set_text(s_about, s_about_text);
+    }
 }
 
 void settings_screen_on_forget(void (*cb)(void))

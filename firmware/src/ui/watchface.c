@@ -3,10 +3,12 @@
 #include <stdio.h>
 
 #include "lvgl.h"
+#include "ui/glyph.h"
 #include "ui/theme.h"
 #include "ui/weather_icon.h"
 
 #define GOAL_BAR_W     110
+#define HINT_MS        2500
 #define COLOR_GOAL_MET lv_color_hex(0x2EBD59)
 
 static lv_obj_t *s_bluetooth;
@@ -16,6 +18,9 @@ static lv_obj_t *s_power;
 static lv_obj_t *s_steps;
 static lv_obj_t *s_goal_bar;
 static lv_obj_t *s_dnd;
+static lv_obj_t *s_lock;
+static lv_obj_t *s_hint;
+static lv_timer_t *s_hint_timer;
 static lv_obj_t *s_alarm;
 static lv_obj_t *s_weather;
 static lv_obj_t *s_weather_icon;
@@ -66,6 +71,15 @@ void watchface_create(lv_obj_t *parent)
     lv_obj_align(s_dnd, LV_ALIGN_TOP_MID, 0, 7);
     lv_obj_set_hidden(s_dnd, true);
 
+    s_lock = glyph_create(parent, GLYPH_LOCK, 18, UI_COLOR_DIM);
+    lv_obj_align(s_lock, LV_ALIGN_TOP_MID, -38, 6);
+    lv_obj_set_hidden(s_lock, true);
+
+    s_hint = ui_label(parent, &lv_font_montserrat_16, lv_color_white());
+    lv_label_set_text(s_hint, "Press button to unlock");
+    lv_obj_align(s_hint, LV_ALIGN_CENTER, 0, 84);
+    lv_obj_set_hidden(s_hint, true);
+
     s_weather = lv_obj_create(parent);
     lv_obj_remove_style_all(s_weather);
     lv_obj_set_size(s_weather, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -93,6 +107,40 @@ void watchface_set_weather(const weather_t *w)
 void watchface_set_dnd(bool on)
 {
     lv_obj_set_hidden(s_dnd, !on);
+}
+
+static void show_hint(bool show)
+{
+    lv_obj_set_hidden(s_hint, !show);
+    lv_obj_set_hidden(s_steps, show);
+    lv_obj_set_hidden(s_goal_bar, show);
+}
+
+static void on_hint_timeout(lv_timer_t *t)
+{
+    (void)t;
+    s_hint_timer = NULL;
+    show_hint(false);
+}
+
+void watchface_set_locked(bool locked)
+{
+    lv_obj_set_hidden(s_lock, !locked);
+    if (!locked && s_hint_timer) {
+        lv_timer_delete(s_hint_timer);
+        on_hint_timeout(NULL);
+    }
+}
+
+void watchface_show_unlock_hint(void)
+{
+    show_hint(true);
+    if (s_hint_timer) {
+        lv_timer_reset(s_hint_timer);
+        return;
+    }
+    s_hint_timer = lv_timer_create(on_hint_timeout, HINT_MS, NULL);
+    lv_timer_set_repeat_count(s_hint_timer, 1);
 }
 
 void watchface_set_alarm(bool on)

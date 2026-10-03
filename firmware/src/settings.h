@@ -15,6 +15,14 @@ typedef struct {
     bool bluetooth;              // always on after a restart
     bool dnd;                    // notifications go quietly into the list; always off after a restart
     bool touch_feedback;         // clicks for taps, scroll wheels and dragging
+    bool celsius;                // weather temperatures; Fahrenheit when false
+    bool wind_kmh;               // weather wind speeds; mph when false
+    bool touch_lock;             // touches only wake the watch face; always off after a restart
+    bool sleep_mode;             // tinted, dim, touch locked, quiet notifications, no raise to wake
+    bool sleep_green;            // sleep mode tint; red when false
+    bool sleep_schedule;         // sleep mode turns on at sleep_start and off at sleep_end
+    uint16_t sleep_start;        // minutes after midnight
+    uint16_t sleep_end;
 } settings_t;
 
 void settings_init(void);

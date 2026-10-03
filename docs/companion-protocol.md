@@ -122,10 +122,11 @@ App to watch. Replaces the watch's weather; it's kept across restarts.
 - `lat`, `lon`: where the forecast is for (two decimals is plenty). The watch computes dawn,
   sunrise, sunset, dusk and the moon's rise, set and phase itself from these, so the app
   doesn't need to send them, and the Moon app keeps working while the phone is away.
-- `unit`: `"F"` or `"C"`, for display. Temperatures are whole numbers in that unit.
-- `wind_unit`: `"mph"` or `"kmh"`. `wind` is already in that unit, and it does not have to match
-  `unit` (Fahrenheit with km/h is allowed). If `wind_unit` is left out, treat the wind as mph
-  when `unit` is `"F"` and km/h when `unit` is `"C"`.
+- `unit`: `"F"` or `"C"`: the unit the temperatures (whole numbers) are in.
+- `wind_unit`: `"mph"` or `"kmh"`. `wind` is in that unit, and it does not have to match `unit`
+  (Fahrenheit with km/h is allowed). If left out, mph with `"F"` and km/h with `"C"`.
+- The watch converts to the user's chosen units itself (the `temp_unit` and `wind_unit`
+  settings), so any units work. Sending them in the chosen units avoids rounding twice.
 - `code`: a WMO weather interpretation code, as returned by Open-Meteo's `weather_code`
   (0 clear, 1-3 mainly clear to overcast, 45/48 fog, 51-57 drizzle, 61-67 rain, 71-77 snow,
   80-82 showers, 85/86 snow showers, 95-99 thunderstorm).
@@ -164,7 +165,8 @@ Both reply with every setting:
 {"t": "settings.get", "re": 3, "ok": true, "settings": {
   "brightness": 60, "screen_timeout": 5, "raise_to_wake": true, "tap_to_wake": true,
   "notify_vibrate": true, "touch_feedback": true, "clock_24h": false, "dnd": false,
-  "bluetooth": true, "step_goal": 8000, "temp_unit": "F", "wind_unit": "mph"
+  "bluetooth": true, "step_goal": 8000, "temp_unit": "F", "wind_unit": "mph",
+  "sleep_mode": false, "sleep_color": "red", "sleep_schedule": false, "sleep_start": 1320, "sleep_end": 420
 }}
 ```
 
@@ -176,19 +178,22 @@ Both reply with every setting:
 | `notify_vibrate` | buzz for notifications |
 | `touch_feedback` | clicks for taps, scroll wheels and dragging |
 | `clock_24h` | 24-hour clock |
-| `dnd` | Do not disturb (always off after a restart) |
+| `dnd` | Do not disturb: notifications go quietly into the list; alarms and timers still ring (always off after a restart) |
 | `bluetooth` | read only; turning it off would cut off the app |
 | `step_goal` | daily step goal, 1000-50000 |
 | `temp_unit` | `"F"` or `"C"`. Default `"F"` |
 | `wind_unit` | `"mph"` or `"kmh"`. Default `"mph"`. Independent of `temp_unit` |
+| `sleep_mode` | Sleep mode: screen tinted and dim, touch locked, notifications quiet, no raise to wake. Alarms and timers still ring |
+| `sleep_color` | `"red"` or `"green"`, the sleep mode tint. Default `"red"` |
+| `sleep_schedule` | Sleep mode turns on at `sleep_start` and off at `sleep_end` each day |
+| `sleep_start`, `sleep_end` | Minutes after midnight, local time. Defaults 1320 (10 PM) and 420 (7 AM) |
 
-`temp_unit` and `wind_unit` are the user's preference. The phone fetches the forecast in those
-units and sends numbers that are already converted. The watch stores the preference, shows it in
-Settings, and sends `settings.changed` when it changes. It does not convert temperatures or wind
-itself. Label the forecast from that forecast's `unit` and `wind_unit`, and keep showing the
-previous forecast with its own labels until the next `weather.set` arrives. Anything other than
-`"F"` / `"C"` or `"mph"` / `"kmh"` is left unchanged. Older watches omit these two fields; the
-phone then keeps its own choice and still labels `weather.set` with `unit` and `wind_unit`.
+`temp_unit` and `wind_unit` are the user's preference, shared by the watch and the app. They can
+be changed on the watch (Units in the Weather app), which sends `settings.changed`. The phone
+fetches the forecast in those units and labels it with `unit` and `wind_unit`; the watch converts
+any forecast to the chosen units for display, so a unit change shows at once, before the next
+`weather.set`. Anything other than `"F"` / `"C"` or `"mph"` / `"kmh"` is left unchanged. Older
+watches omit these two fields; the phone then keeps its own choice.
 
 `settings.set` only changes the settings it includes. Out-of-range values are clamped. When a
 setting is changed on the watch itself, it sends:

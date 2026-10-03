@@ -27,7 +27,9 @@
 #include "ui/flashlight.h"
 #include "ui/health_app.h"
 #include "ui/screens.h"
+#include "ui/quick_settings.h"
 #include "ui/settings_screen.h"
+#include "ui/tint.h"
 #include "ui/watchface.h"
 #include "ui/weather_app.h"
 #include "weather.h"
@@ -74,6 +76,7 @@ static struct {
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
 {
     int32_t w = lv_area_get_width(area);
+    tint_apply((uint16_t *)px, lv_area_get_size(area));
     const uint16_t *src = (const uint16_t *)px;
     for (int32_t y = area->y1; y <= area->y2; y++) {
         memcpy(&s_fb[y * W + area->x1], src, w * sizeof(uint16_t));
@@ -259,8 +262,11 @@ static void apply_settings(const settings_t *s)
            s->brightness, s->screen_timeout_s, s->raise_to_wake, s->tap_to_wake, s->notify_vibrate,
            s->clock_24h, s->bluetooth, s->dnd, s->touch_feedback);
     haptics_set_touch_feedback(s->touch_feedback);
+    weather_set_units(s->celsius, s->wind_kmh);
     watchface_set_24h(s->clock_24h);
     watchface_set_dnd(s->dnd);
+    watchface_set_locked(s->touch_lock || s->sleep_mode);
+    tint_set(!s->sleep_mode ? TINT_NONE : s->sleep_green ? TINT_GREEN : TINT_RED);
     refresh_watchface();
 }
 
@@ -283,6 +289,11 @@ static void factory_reset(void)
     printf("[sim] factory reset: would erase flash and restart\n");
 }
 
+static void power_off(void)
+{
+    printf("[sim] power off\n");
+}
+
 static void app_init(void)
 {
     settings_init();
@@ -293,6 +304,7 @@ static void app_init(void)
     settings_on_change(apply_settings);
     settings_screen_on_forget(forget_phone);
     settings_screen_on_factory_reset(factory_reset);
+    quick_settings_on_power_off(power_off);
     flashlight_on_change(on_flashlight);
     settings_screen_set_about("K-Watch simulator");
     refresh_watchface();
@@ -593,6 +605,19 @@ static bool open_app(const char *name)
     return true;
 }
 
+// The row directly in `page` whose first label reads `text`, visible or not.
+static lv_obj_t *settings_row(lv_obj_t *page, const char *text)
+{
+    for (uint32_t i = 0; i < lv_obj_get_child_count(page); i++) {
+        lv_obj_t *row = lv_obj_get_child(page, i);
+        lv_obj_t *label = lv_obj_get_child(row, 0);
+        if (label && lv_obj_check_type(label, &lv_label_class) && strcmp(lv_label_get_text(label), text) == 0) {
+            return row;
+        }
+    }
+    return page;
+}
+
 static void tap(const char *label)
 {
     lv_obj_t *btn = find_button(lv_screen_active(), label);
@@ -665,10 +690,7 @@ static int run_shots(const char *dir)
     ui_close_overlay();
     advance(600);
 
-    hold_and_drag(120, 200, 120, 60, 0);   // scroll the apps page up
-    release();
-    advance(600);
-    tap(LV_SYMBOL_KEYBOARD);
+    open_app("Calculator");
     shot(dir, "28-calculator");
     // Key centres: column c at x = c * 61 + 28, row r at y = 64 + r * 45 + 20.
     static const char TYPED[] = "12+3*";
@@ -698,8 +720,17 @@ static int run_shots(const char *dir)
         lv_obj_t *page = lv_screen_active();
         lv_obj_scroll_to_view(lv_obj_get_child(page, (int32_t)lv_obj_get_child_count(page) - 1), LV_ANIM_OFF);
         shot(dir, "36-weather-week");
-        lv_obj_scroll_to_view(lv_obj_get_child(page, (int32_t)lv_obj_get_child_count(page) - 2), LV_ANIM_OFF);
+        lv_obj_scroll_to_view(lv_obj_get_child(page, (int32_t)lv_obj_get_child_count(page) - 3), LV_ANIM_OFF);
         shot(dir, "39-weather-sun");
+        lv_obj_scroll_to_view(lv_obj_get_child(page, (int32_t)lv_obj_get_child_count(page) - 1), LV_ANIM_OFF);
+        tap("C");
+        advance(100);
+        shot(dir, "45-weather-units-celsius");
+        lv_obj_scroll_to_y(page, 0, LV_ANIM_OFF);
+        shot(dir, "46-weather-celsius");
+        lv_obj_scroll_to_view(lv_obj_get_child(page, (int32_t)lv_obj_get_child_count(page) - 1), LV_ANIM_OFF);
+        tap("F");
+        advance(100);
         tap(LV_SYMBOL_REFRESH);
         shot(dir, "37-weather-asking");
         ui_close_overlay();
@@ -763,17 +794,53 @@ static int run_shots(const char *dir)
     shot(dir, "21-alarm-ringing");
     alert_dismiss();
 
-    ui_show_screen("settings", false);
+    open_app("Settings");
     shot(dir, "11-settings");
     lv_obj_t *page = lv_obj_get_parent(find_button(lv_screen_active(), "Brightness"));
     lv_obj_scroll_to_y(page, LV_COORD_MAX, LV_ANIM_OFF);
     shot(dir, "12-settings-bottom");
     lv_obj_scroll_to_y(page, 0, LV_ANIM_OFF);
-    tap("Do not disturb");
+    lv_obj_scroll_to_y(page, lv_obj_get_y(settings_row(page, "Sleep mode")) + 10, LV_ANIM_OFF);
+    tap("Schedule");
+    shot(dir, "50-settings-sleep");
+    tap("Starts");
+    shot(dir, "51-sleep-starts");
+    ui_close_overlay();
+    advance(600);
+    tap("Schedule");
+    lv_obj_scroll_to_y(page, 0, LV_ANIM_OFF);
+    ui_close_overlay();
+    advance(600);
+
+    ui_show_screen("quick settings", false);
+    shot(dir, "43-quick-settings");
+    tap(LV_SYMBOL_EYE_CLOSE);
+    tap("Lock");
+    shot(dir, "44-quick-settings-on");
+    hold_and_drag(120, 200, 120, 120, 0);
+    release();
+    tap(LV_SYMBOL_POWER " Off");
+    shot(dir, "47-quick-settings-scrolled");
     ui_show_home(false);
     shot(dir, "13-watchface-dnd");
-    ui_show_screen("settings", false);
-    tap("Do not disturb");
+    ui_show_screen("quick settings", false);
+    tap(LV_SYMBOL_EYE_CLOSE);
+    tap("Lock");
+
+    settings_t sleepy = *settings_get();
+    sleepy.sleep_mode = true;
+    settings_update(&sleepy);
+    ui_show_home(false);
+    shot(dir, "48-sleep-red");
+    watchface_show_unlock_hint();
+    shot(dir, "52-sleep-unlock-hint");
+    advance(3000);
+    sleepy.sleep_green = true;
+    settings_update(&sleepy);
+    shot(dir, "49-sleep-green");
+    sleepy.sleep_mode = false;
+    sleepy.sleep_green = false;
+    settings_update(&sleepy);
 
     ui_show_screen("apps", false);
     advance(600);

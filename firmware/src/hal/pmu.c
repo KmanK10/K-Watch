@@ -11,6 +11,8 @@
 #define REG_STATUS1         0x00
 #define REG_STATUS2         0x01
 #define REG_IC_TYPE         0x03
+#define REG_COMMON_CFG      0x10
+#define COMMON_SOFT_PWROFF  (1 << 0)
 #define REG_VOFF_SET        0x24
 #define REG_ADC_CTRL        0x30
 #define REG_ADC_VBAT_H      0x34
@@ -161,4 +163,9 @@ void pmu_set_backlight_power(bool on)
 void pmu_set_haptics_power(bool on)
 {
     i2c_reg_update(s_dev, REG_LDO_ONOFF0, LDO_BLDO2, on ? LDO_BLDO2 : 0);
+}
+
+void pmu_power_off(void)
+{
+    i2c_reg_update(s_dev, REG_COMMON_CFG, COMMON_SOFT_PWROFF, COMMON_SOFT_PWROFF);
 }

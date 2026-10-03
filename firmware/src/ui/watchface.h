@@ -17,6 +17,10 @@ void watchface_set_steps(uint32_t steps, uint32_t goal);
 void watchface_set_connected(bool connected);
 void watchface_set_24h(bool on);
 void watchface_set_dnd(bool on);
+// A padlock at the top while touches are locked.
+void watchface_set_locked(bool locked);
+// Briefly shows "Press button to unlock" in place of the step count.
+void watchface_show_unlock_hint(void);
 // Shows a bell while any alarm is on.
 void watchface_set_alarm(bool on);
 // The current conditions above the time; NULL hides them. Redraws every call, so only call it

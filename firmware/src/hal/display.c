@@ -17,6 +17,7 @@
 #include "lvgl.h"
 #include "pmu.h"
 #include "touch.h"
+#include "ui/tint.h"
 
 #define LCD_HOST           SPI2_HOST
 #define LCD_PCLK_HZ        (40 * 1000 * 1000)
@@ -36,6 +37,9 @@ static lv_display_t *s_disp;
 static esp_pm_lock_handle_t s_render_lock;
 static uint8_t s_brightness = 60;
 static bool s_asleep;   // the backlight stays off until display_wake
+static bool s_touch_locked;
+static bool s_was_pressed;
+static bool s_locked_touch;
 
 static bool on_flush_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *edata, void *ctx)
 {
@@ -48,6 +52,7 @@ static bool on_flush_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_d
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
 {
     (void)disp;
+    tint_apply((uint16_t *)px, lv_area_get_size(area));
     lv_draw_sw_rgb565_swap(px, lv_area_get_size(area));
     esp_lcd_panel_draw_bitmap(s_panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, px);
 }
@@ -56,7 +61,12 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
     (void)indev;
     int16_t x, y;
-    if (touch_read(&x, &y)) {
+    bool pressed = touch_read(&x, &y);
+    if (pressed && !s_was_pressed && s_touch_locked) {
+        s_locked_touch = true;
+    }
+    s_was_pressed = pressed;
+    if (pressed && !s_touch_locked) {
         data->point.x = x;
         data->point.y = y;
         data->state = LV_INDEV_STATE_PRESSED;
@@ -228,4 +238,16 @@ uint32_t display_inactive_ms(void)
 void display_trigger_activity(void)
 {
     lv_display_trigger_activity(s_disp);
+}
+
+void display_set_touch_locked(bool locked)
+{
+    s_touch_locked = locked;
+}
+
+bool display_take_locked_touch(void)
+{
+    bool touched = s_locked_touch;
+    s_locked_touch = false;
+    return touched;
 }

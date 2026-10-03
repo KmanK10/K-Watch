@@ -24,3 +24,8 @@ uint32_t display_run(void);
 
 uint32_t display_inactive_ms(void);
 void display_trigger_activity(void);
+
+// While locked, touches never reach the UI.
+void display_set_touch_locked(bool locked);
+// True once for each touch that started while locked.
+bool display_take_locked_touch(void);

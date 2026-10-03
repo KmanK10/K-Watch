@@ -22,11 +22,20 @@ static settings_t s_settings = {
     .bluetooth = true,
     .dnd = false,
     .touch_feedback = true,
+    .celsius = false,
+    .wind_kmh = false,
+    .touch_lock = false,
+    .sleep_mode = false,
+    .sleep_green = false,
+    .sleep_schedule = false,
+    .sleep_start = 22 * 60,
+    .sleep_end = 7 * 60,
 };
 static void (*s_on_change)(const settings_t *s);
 static bool s_unsaved;
 
-typedef struct {
+// Packed so the settings always start right after the version byte, whatever fields settings_t gains.
+typedef struct __attribute__((packed)) {
     uint8_t version;
     settings_t settings;
 } saved_t;
@@ -44,9 +53,21 @@ void settings_init(void)
         s_settings = saved.settings;
     }
     nvs_close(h);
+    // Anything out of range falls back to the default, so a bad save can't leave the screen dark.
+    if (s_settings.brightness < 10 || s_settings.brightness > 100) {
+        s_settings.brightness = 60;
+    }
+    if (s_settings.screen_timeout_s < 5 || s_settings.screen_timeout_s > 30) {
+        s_settings.screen_timeout_s = 5;
+    }
+    if (s_settings.sleep_start >= 24 * 60 || s_settings.sleep_end >= 24 * 60) {
+        s_settings.sleep_start = 22 * 60;
+        s_settings.sleep_end = 7 * 60;
+    }
     // Quick toggles start fresh each boot, so a restart always brings the phone link back.
     s_settings.bluetooth = true;
     s_settings.dnd = false;
+    s_settings.touch_lock = false;
 }
 
 const settings_t *settings_get(void)

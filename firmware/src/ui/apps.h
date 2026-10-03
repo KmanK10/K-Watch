@@ -8,3 +8,6 @@
 
 void apps_create(lv_obj_t *parent);
 void apps_on_show(void);
+
+// Opens the app with this name, as if its icon was tapped. False if there isn't one.
+bool apps_open(const char *name);

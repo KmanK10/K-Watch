@@ -36,3 +36,6 @@ void pmu_set_backlight_power(bool on);
 
 // DRV2605 vibration driver supply. It loses its settings when switched off.
 void pmu_set_haptics_power(bool on);
+
+// Cuts all power. A long press of the side button turns the watch back on.
+void pmu_power_off(void);

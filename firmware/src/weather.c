@@ -1,12 +1,13 @@
 #include "weather.h"
 
+#include <math.h>
 #include <time.h>
 
 #include "esp_log.h"
 #include "nvs.h"
 
 // Bump when weather_t changes, so an old saved forecast is ignored instead of misread.
-#define WEATHER_VERSION 3
+#define WEATHER_VERSION 4
 
 static const char *TAG = "weather";
 
@@ -15,8 +16,49 @@ typedef struct {
     weather_t weather;
 } saved_t;
 
-static weather_t s_weather;
+static weather_t s_raw;          // as the app sent it
+static weather_t s_weather;      // converted to the chosen units
+static bool s_celsius;
+static bool s_wind_kmh;
 static void (*s_on_change)(void);
+
+static int16_t convert_temp(int16_t t, char from, char to)
+{
+    if (t == WEATHER_UNKNOWN || from == to) {
+        return t;
+    }
+    float v = to == 'C' ? (t - 32) * 5.0f / 9.0f : t * 9.0f / 5.0f + 32;
+    return (int16_t)lroundf(v);
+}
+
+static int16_t convert_wind(int16_t w, bool from_kmh, bool to_kmh)
+{
+    if (w == WEATHER_UNKNOWN || from_kmh == to_kmh) {
+        return w;
+    }
+    return (int16_t)lroundf(to_kmh ? w * 1.609344f : w / 1.609344f);
+}
+
+static void convert(void)
+{
+    s_weather = s_raw;
+    char from = s_raw.unit;
+    char to = s_celsius ? 'C' : 'F';
+    s_weather.unit = to;
+    s_weather.temp = convert_temp(s_raw.temp, from, to);
+    s_weather.feels = convert_temp(s_raw.feels, from, to);
+    s_weather.high = convert_temp(s_raw.high, from, to);
+    s_weather.low = convert_temp(s_raw.low, from, to);
+    for (int i = 0; i < s_raw.hour_count; i++) {
+        s_weather.hours[i].temp = convert_temp(s_raw.hours[i].temp, from, to);
+    }
+    for (int i = 0; i < s_raw.day_count; i++) {
+        s_weather.days[i].high = convert_temp(s_raw.days[i].high, from, to);
+        s_weather.days[i].low = convert_temp(s_raw.days[i].low, from, to);
+    }
+    s_weather.wind_kmh = s_wind_kmh;
+    s_weather.wind = convert_wind(s_raw.wind, s_raw.wind_kmh, s_wind_kmh);
+}
 
 void weather_init(void)
 {
@@ -28,8 +70,9 @@ void weather_init(void)
     size_t len = sizeof(saved);
     if (nvs_get_blob(h, "v", &saved, &len) == ESP_OK && len == sizeof(saved) &&
         saved.version == WEATHER_VERSION) {
-        s_weather = saved.weather;
-        ESP_LOGI(TAG, "loaded weather for %s from %ld s ago", s_weather.location, (long)weather_age_s());
+        s_raw = saved.weather;
+        convert();
+        ESP_LOGI(TAG, "loaded weather for %s from %ld s ago", s_raw.location, (long)weather_age_s());
     }
     nvs_close(h);
 }
@@ -39,16 +82,30 @@ const weather_t *weather_get(void)
     return s_weather.updated ? &s_weather : NULL;
 }
 
+void weather_set_units(bool celsius, bool wind_kmh)
+{
+    if (celsius == s_celsius && wind_kmh == s_wind_kmh) {
+        return;
+    }
+    s_celsius = celsius;
+    s_wind_kmh = wind_kmh;
+    convert();
+    if (s_weather.updated && s_on_change) {
+        s_on_change();
+    }
+}
+
 void weather_set(const weather_t *w)
 {
-    s_weather = *w;
+    s_raw = *w;
+    convert();
     ESP_LOGI(TAG, "%s: %d%c, code %d", w->location, w->temp, w->unit, w->code);
 
     nvs_handle_t h;
     if (nvs_open("weather", NVS_READWRITE, &h) == ESP_OK) {
         static saved_t saved;
         saved.version = WEATHER_VERSION;
-        saved.weather = s_weather;
+        saved.weather = s_raw;
         if (nvs_set_blob(h, "v", &saved, sizeof(saved)) == ESP_OK) {
             nvs_commit(h);
         }

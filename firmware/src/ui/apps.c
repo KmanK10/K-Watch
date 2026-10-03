@@ -12,6 +12,7 @@
 #include "ui/flashlight.h"
 #include "ui/health_app.h"
 #include "ui/screens.h"
+#include "ui/settings_screen.h"
 #include "ui/stopwatch.h"
 #include "ui/moon_app.h"
 #include "ui/theme.h"
@@ -49,7 +50,7 @@ static const app_t s_apps[] = {
     {"Weather", "", draw_weather_icon, 0x29B6F6, weather_app_create, weather_app_on_show, NULL},
     {"Moon", "", moon_app_draw_icon, 0x283593, moon_app_create, moon_app_on_show, NULL},
     {"Music", LV_SYMBOL_AUDIO, NULL, 0xE53950, NULL, NULL, "music"},
-    {"Settings", LV_SYMBOL_SETTINGS, NULL, 0x707070, NULL, NULL, "settings"},
+    {"Settings", LV_SYMBOL_SETTINGS, NULL, 0x707070, settings_screen_create, settings_screen_on_show, NULL},
 };
 #define APP_COUNT (sizeof(s_apps) / sizeof(s_apps[0]))
 
@@ -165,9 +166,8 @@ static void on_drop(lv_event_t *e)
     save_order();
 }
 
-static void on_app(lv_event_t *e)
+static void open_app(size_t i)
 {
-    size_t i = (size_t)(uintptr_t)lv_event_get_user_data(e);
     const app_t *app = &s_apps[i];
     if (app->screen) {
         ui_show_screen(app->screen, false);
@@ -182,6 +182,22 @@ static void on_app(lv_event_t *e)
         app->on_show();
     }
     ui_show_overlay(s_screens[i]);
+}
+
+static void on_app(lv_event_t *e)
+{
+    open_app((size_t)(uintptr_t)lv_event_get_user_data(e));
+}
+
+bool apps_open(const char *name)
+{
+    for (size_t i = 0; i < APP_COUNT; i++) {
+        if (strcmp(s_apps[i].name, name) == 0) {
+            open_app(i);
+            return true;
+        }
+    }
+    return false;
 }
 
 static void add_app(lv_obj_t *grid, size_t i)
