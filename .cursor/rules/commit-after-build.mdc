@@ -1,0 +1,14 @@
+---
+description: Commit and push after every successful build
+alwaysApply: true
+---
+
+# Commit and push after a build
+
+After a build of this project succeeds, commit the changes that build includes and push them to `origin`.
+
+- Do this for device, simulator, and test builds that compile the current work.
+- Write one or two sentences on why the change exists, matching recent commit style.
+- Leave out secrets, `DerivedData`, and `xcuserdata`.
+- Skip the commit when the build failed or there is nothing new to commit.
+- Do not amend, and do not force-push.

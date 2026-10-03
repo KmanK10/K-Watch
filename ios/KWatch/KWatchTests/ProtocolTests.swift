@@ -116,6 +116,8 @@ final class MessageTests: XCTestCase {
         XCTAssertNil(settings?["step_goal"])
         XCTAssertNil(settings?["temp_unit"])
         XCTAssertNil(settings?["wind_unit"])
+        XCTAssertNil(settings?["sleep_mode"])
+        XCTAssertNil(settings?["sleep_start"])
     }
 
     func testUnitSettingsAreIndependentOnTheWire() throws {
@@ -135,6 +137,38 @@ final class MessageTests: XCTestCase {
         guard case .settings(let watch, nil) = changed else { return XCTFail("\(changed)") }
         XCTAssertEqual(watch.temperature, .celsius)
         XCTAssertEqual(watch.wind, .kmh)
+        XCTAssertNil(watch.sleepMode)
+    }
+
+    func testSleepSettingsRoundTrip() throws {
+        let data = try MessageCodec.encode(SettingsMessage(
+            t: "settings.set",
+            id: 10,
+            settings: SettingsPatch(
+                sleepMode: true,
+                sleepColor: .green,
+                sleepSchedule: true,
+                sleepStart: 22 * 60,
+                sleepEnd: 7 * 60
+            )
+        ))
+        let settings = try json(data)["settings"] as? [String: Any]
+        XCTAssertEqual(settings?["sleep_mode"] as? Bool, true)
+        XCTAssertEqual(settings?["sleep_color"] as? String, "green")
+        XCTAssertEqual(settings?["sleep_schedule"] as? Bool, true)
+        XCTAssertEqual(int(settings?["sleep_start"]), 1320)
+        XCTAssertEqual(int(settings?["sleep_end"]), 420)
+        XCTAssertNil(settings?["brightness"])
+
+        let reply = try MessageCodec.decode(Data("""
+        {"t":"settings.get","re":3,"ok":true,"settings":{"brightness":60,"screen_timeout":5,"raise_to_wake":true,"tap_to_wake":true,"notify_vibrate":true,"touch_feedback":true,"clock_24h":false,"dnd":false,"bluetooth":true,"step_goal":8000,"temp_unit":"F","wind_unit":"mph","sleep_mode":false,"sleep_color":"red","sleep_schedule":false,"sleep_start":1320,"sleep_end":420}}
+        """.utf8))
+        guard case .settings(let watch, 3) = reply else { return XCTFail("\(reply)") }
+        XCTAssertEqual(watch.sleepMode, false)
+        XCTAssertEqual(watch.sleepColor, .red)
+        XCTAssertEqual(watch.sleepSchedule, false)
+        XCTAssertEqual(watch.sleepStart, 1320)
+        XCTAssertEqual(watch.sleepEnd, 420)
     }
 
     func testDecodeSpecReplies() throws {
@@ -157,6 +191,8 @@ final class MessageTests: XCTestCase {
         XCTAssertTrue(watch.bluetooth)
         XCTAssertNil(watch.temperature)
         XCTAssertNil(watch.wind)
+        XCTAssertNil(watch.sleepMode)
+        XCTAssertNil(watch.sleepStart)
 
         let changed = try MessageCodec.decode(Data("""
         {"t":"settings.changed","settings":{"brightness":80,"screen_timeout":10,"raise_to_wake":true,"tap_to_wake":false,"notify_vibrate":true,"touch_feedback":true,"clock_24h":true,"dnd":true,"bluetooth":true,"step_goal":9000}}

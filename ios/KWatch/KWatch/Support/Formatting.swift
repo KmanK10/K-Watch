@@ -52,6 +52,19 @@ enum Format {
         return String(format: "%.2f V", Double(millivolts) / 1000)
     }
 
+    /// `minutes` is minutes after midnight, the same clock the watch uses for sleep times.
+    static func timeOfDay(_ minutes: Int, twentyFourHour: Bool) -> String {
+        let minutes = ((minutes % 1440) + 1440) % 1440
+        var components = DateComponents()
+        components.hour = minutes / 60
+        components.minute = minutes % 60
+        let date = Calendar.current.date(from: components) ?? Date()
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateFormat = twentyFourHour ? "HH:mm" : "h:mm a"
+        return formatter.string(from: date)
+    }
+
     static func clock(_ unix: Int, twentyFourHour: Bool) -> String {
         let formatter = DateFormatter()
         formatter.locale = .current

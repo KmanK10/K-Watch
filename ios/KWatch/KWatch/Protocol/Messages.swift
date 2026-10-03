@@ -199,6 +199,11 @@ struct SettingsPatch: Encodable, Equatable {
     var stepGoal: Int?
     var temperature: TemperatureUnit?
     var wind: WindUnit?
+    var sleepMode: Bool?
+    var sleepColor: SleepColor?
+    var sleepSchedule: Bool?
+    var sleepStart: Int?
+    var sleepEnd: Int?
 
     enum CodingKeys: String, CodingKey {
         case brightness
@@ -212,12 +217,19 @@ struct SettingsPatch: Encodable, Equatable {
         case stepGoal = "step_goal"
         case temperature = "temp_unit"
         case wind = "wind_unit"
+        case sleepMode = "sleep_mode"
+        case sleepColor = "sleep_color"
+        case sleepSchedule = "sleep_schedule"
+        case sleepStart = "sleep_start"
+        case sleepEnd = "sleep_end"
     }
 
     var isEmpty: Bool {
         brightness == nil && screenTimeout == nil && raiseToWake == nil && tapToWake == nil
             && notifyVibrate == nil && touchFeedback == nil && clock24h == nil && dnd == nil
             && stepGoal == nil && temperature == nil && wind == nil
+            && sleepMode == nil && sleepColor == nil && sleepSchedule == nil
+            && sleepStart == nil && sleepEnd == nil
     }
 }
 
@@ -235,6 +247,13 @@ struct WatchSettings: Equatable {
     /// Nil when this watch build does not report the field yet.
     var temperature: TemperatureUnit?
     var wind: WindUnit?
+    /// Nil when this watch build does not report sleep settings yet.
+    var sleepMode: Bool?
+    var sleepColor: SleepColor?
+    var sleepSchedule: Bool?
+    /// Minutes after midnight, local time.
+    var sleepStart: Int?
+    var sleepEnd: Int?
 
     static let timeouts = [5, 10, 15, 30]
     static let brightnessRange = 10 ... 100
@@ -312,6 +331,14 @@ enum TemperatureUnit: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var apiName: String { self == .fahrenheit ? "fahrenheit" : "celsius" }
     var label: String { self == .fahrenheit ? "°F" : "°C" }
+}
+
+enum SleepColor: String, Codable, CaseIterable, Identifiable {
+    case red
+    case green
+
+    var id: String { rawValue }
+    var label: String { self == .red ? "Red" : "Green" }
 }
 
 enum WindUnit: String, Codable, CaseIterable, Identifiable {

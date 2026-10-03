@@ -97,7 +97,12 @@ enum MessageCodec {
             bluetooth: bluetooth,
             stepGoal: stepGoal,
             temperature: (object["temp_unit"] as? String).flatMap(TemperatureUnit.init(rawValue:)),
-            wind: (object["wind_unit"] as? String).flatMap(WindUnit.init(rawValue:))
+            wind: (object["wind_unit"] as? String).flatMap(WindUnit.init(rawValue:)),
+            sleepMode: boolValue(object["sleep_mode"]),
+            sleepColor: (object["sleep_color"] as? String).flatMap(SleepColor.init(rawValue:)),
+            sleepSchedule: boolValue(object["sleep_schedule"]),
+            sleepStart: intValue(object["sleep_start"]).map { min(24 * 60 - 1, max(0, $0)) },
+            sleepEnd: intValue(object["sleep_end"]).map { min(24 * 60 - 1, max(0, $0)) }
         )
     }
 
