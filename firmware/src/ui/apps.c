@@ -7,8 +7,10 @@
 #include "nvs.h"
 
 #include "ui/alarm_app.h"
+#include "ui/calculator.h"
 #include "ui/countdown.h"
 #include "ui/flashlight.h"
+#include "ui/health_app.h"
 #include "ui/screens.h"
 #include "ui/stopwatch.h"
 #include "ui/theme.h"
@@ -31,6 +33,8 @@ static const app_t s_apps[] = {
     {"Alarms", LV_SYMBOL_BELL, 0x7E57C2, alarm_app_create, alarm_app_on_show, NULL},
     {"Timer", LV_SYMBOL_REFRESH, 0xFF5F1F, countdown_create, NULL, NULL},
     {"Stopwatch", LV_SYMBOL_LOOP, 0x2EBD59, stopwatch_create, stopwatch_on_show, NULL},
+    {"Health", LV_SYMBOL_PLUS, 0xEC407A, health_app_create, health_app_on_show, NULL},
+    {"Calculator", LV_SYMBOL_KEYBOARD, 0x1E88E5, calculator_create, NULL, NULL},
     {"Music", LV_SYMBOL_AUDIO, 0xE53950, NULL, NULL, "music"},
     {"Settings", LV_SYMBOL_SETTINGS, 0x707070, NULL, NULL, "settings"},
 };

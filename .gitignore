@@ -8,6 +8,7 @@ firmware/dependencies.lock
 # UI simulator
 sim/build/
 sim/shots/
+__pycache__/
 
 # Editors
 .vscode/.browse.c_cpp.db*

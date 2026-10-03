@@ -15,6 +15,7 @@
 #include "png.h"
 #include "sim.h"
 #include "ui/alert.h"
+#include "ui/apps.h"
 #include "ui/countdown.h"
 #include "ui/music.h"
 #include "ui/notify.h"
@@ -23,6 +24,7 @@
 #include "haptics.h"
 #include "settings.h"
 #include "ui/flashlight.h"
+#include "ui/health_app.h"
 #include "ui/screens.h"
 #include "ui/settings_screen.h"
 #include "ui/watchface.h"
@@ -545,6 +547,42 @@ static int run_shots(const char *dir)
 
     ui_show_screen("apps", false);
     shot(dir, "14-apps");
+    tap(LV_SYMBOL_PLUS);
+    shot(dir, "24-health");
+    lv_obj_scroll_by(lv_screen_active(), 0, -200, LV_ANIM_OFF);
+    shot(dir, "25-health-week");
+    lv_obj_t *health = lv_screen_active();
+    lv_obj_scroll_to_view(lv_obj_get_child(health, (int32_t)lv_obj_get_child_count(health) - 1), LV_ANIM_OFF);
+    tap(LV_SYMBOL_PLUS);
+    shot(dir, "26-health-goal");
+    health_show_goal_reached();
+    shot(dir, "27-goal-reached");
+    ui_close_overlay();
+    advance(600);
+    ui_close_overlay();
+    advance(600);
+
+    hold_and_drag(120, 200, 120, 60, 0);   // scroll the apps page up
+    release();
+    advance(600);
+    tap(LV_SYMBOL_KEYBOARD);
+    shot(dir, "28-calculator");
+    // Key centres: column c at x = c * 61 + 28, row r at y = 64 + r * 45 + 20.
+    static const char TYPED[] = "12+3*";
+    for (const char *k = TYPED; *k; k++) {
+        const char *keys = "789/456*123-.0=+";
+        int i = (int)(strchr(keys, *k) - keys);
+        tap_at((i % 4) * 61 + 28, 64 + (i / 4) * 45 + 20);
+        advance(100);
+    }
+    shot(dir, "29-calculator-typing");
+    tap_at(0 * 61 + 28, 64 + 1 * 45 + 20);   // 4
+    advance(100);
+    tap_at(2 * 61 + 28, 64 + 3 * 45 + 20);   // =
+    shot(dir, "30-calculator-result");
+    ui_close_overlay();
+    advance(600);
+    apps_on_show();
     tap(LV_SYMBOL_REFRESH);
     shot(dir, "06-timer");
     tap(LV_SYMBOL_PLAY);

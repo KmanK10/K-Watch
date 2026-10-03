@@ -5,6 +5,7 @@
 #include "haptics.h"
 #include "phone/phone.h"
 #include "sim.h"
+#include "steps.h"
 #include "ui/notify.h"
 
 static const char *const MEDIA_NAMES[] = {"play", "pause", "play/pause", "next", "previous",
@@ -21,6 +22,58 @@ void phone_notification_action(uint32_t uid, bool positive)
     printf("[phone] notification %u: %s\n", (unsigned)uid, positive ? "accept" : "decline/clear");
     // The phone would answer by removing the notification.
     notify_remove(uid);
+}
+
+// A made-up month: yesterday first, 0 for days the watch was off.
+static const uint32_t SAMPLE_DAYS[STEPS_HISTORY_DAYS] = {
+    9120, 6480, 11200, 0, 7350, 8800, 5210, 10400, 7900, 6600, 8300, 9900, 4500, 7200, 8100,
+};
+static uint32_t s_goal = 8000;
+
+uint32_t steps_today(void)
+{
+    return 4321;
+}
+
+bool steps_on_day(int days_ago, uint32_t *count)
+{
+    if (days_ago == 0) {
+        *count = steps_today();
+        return true;
+    }
+    if (days_ago > STEPS_HISTORY_DAYS || SAMPLE_DAYS[days_ago - 1] == 0) {
+        return false;
+    }
+    *count = SAMPLE_DAYS[days_ago - 1];
+    return true;
+}
+
+uint32_t steps_average(int days, int *days_with_data)
+{
+    uint64_t sum = 0;
+    int n = 0;
+    for (int d = 1; d <= days; d++) {
+        uint32_t count;
+        if (steps_on_day(d, &count)) {
+            sum += count;
+            n++;
+        }
+    }
+    if (days_with_data) {
+        *days_with_data = n;
+    }
+    return n ? (uint32_t)(sum / n) : 0;
+}
+
+uint32_t steps_goal(void)
+{
+    return s_goal;
+}
+
+void steps_set_goal(uint32_t goal)
+{
+    printf("[steps] goal %u\n", (unsigned)goal);
+    s_goal = goal;
 }
 
 void phone_forget(void)

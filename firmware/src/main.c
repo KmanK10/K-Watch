@@ -22,6 +22,7 @@
 #include "ui/alert.h"
 #include "ui/countdown.h"
 #include "ui/flashlight.h"
+#include "ui/health_app.h"
 #include "ui/music.h"
 #include "ui/notify.h"
 #include "ui/pairing.h"
@@ -34,6 +35,8 @@
 #define FLASHLIGHT_TIMEOUT_MS (5 * 60 * 1000)
 #define DIM_BEFORE_OFF_MS  2000
 #define NO_TIMEOUT         UINT32_MAX
+// Steps add up silently while the screen is off, so look at the goal this often until it's met.
+#define GOAL_CHECK_TICKS   pdMS_TO_TICKS(60 * 1000)
 
 static const char *TAG = "k-watch";
 
@@ -44,6 +47,7 @@ static QueueSetHandle_t s_event_set;
 static bool s_screen_on;
 static bool s_dimmed;
 static bool s_alarm_ringing;
+static bool s_goal_reached;
 static uint32_t s_timeout_ms;
 static int64_t s_screen_on_since_us;
 
@@ -323,6 +327,27 @@ static void on_flashlight(uint8_t percent)
     }
 }
 
+// Celebrates once when today's steps pass the goal. Dropping back under it (a new day, or a
+// higher goal) arms it again.
+static void check_step_goal(void)
+{
+    bool reached = steps_today() >= steps_goal();
+    if (!reached || s_goal_reached) {
+        s_goal_reached = reached;
+        return;
+    }
+    s_goal_reached = true;
+    ESP_LOGI(TAG, "step goal reached");
+    // Lowering the goal in the Health app shouldn't throw a party over the top of it.
+    if (settings_get()->dnd || health_app_is_showing() || alert_is_showing() || pairing_is_showing() ||
+        flashlight_is_on()) {
+        return;
+    }
+    health_show_goal_reached();
+    screen_on_for(NOTIFY_TIMEOUT_MS);
+    haptics_play(HAPTIC_NOTIFY);
+}
+
 static void erase_and_restart(lv_timer_t *t)
 {
     (void)t;
@@ -350,6 +375,8 @@ void app_main(void)
 
     ESP_ERROR_CHECK(board_init(s_board_events));
     steps_init();
+    // Already past it from before a restart; no second celebration.
+    s_goal_reached = steps_today() >= steps_goal();
     settings_init();
     alarms_init();
 
@@ -384,8 +411,12 @@ void app_main(void)
         wait = until_timer < wait ? until_timer : wait;
         TickType_t until_alarm = alarms_ticks_until_next();
         wait = until_alarm < wait ? until_alarm : wait;
+        if (!s_goal_reached && GOAL_CHECK_TICKS < wait) {
+            wait = GOAL_CHECK_TICKS;
+        }
         QueueSetMemberHandle_t ready = xQueueSelectFromSet(s_event_set, wait);
         steps_check_day();
+        check_step_goal();
         if (countdown_check_done()) {
             ESP_LOGI(TAG, "timer done");
             s_alarm_ringing = false;
