@@ -109,6 +109,7 @@ App to watch. Replaces the watch's weather; it's kept across restarts.
   "location": "Seattle",
   "lat": 47.61, "lon": -122.33,
   "unit": "F",
+  "wind_unit": "mph",
   "now":   {"temp": 57, "feels": 55, "code": 3, "day": true, "humidity": 80, "wind": 5,
             "uv": 2.4, "aqi": 38},
   "today": {"high": 61, "low": 49, "precip": 40, "sunrise": 1789990000, "sunset": 1790030000},
@@ -121,8 +122,10 @@ App to watch. Replaces the watch's weather; it's kept across restarts.
 - `lat`, `lon`: where the forecast is for (two decimals is plenty). The watch computes dawn,
   sunrise, sunset, dusk and the moon's rise, set and phase itself from these, so the app
   doesn't need to send them, and the Moon app keeps working while the phone is away.
-- `unit`: `"F"` or `"C"`, for display. Temperatures are whole numbers in that unit. `wind` is
-  mph with `"F"` and km/h with `"C"`.
+- `unit`: `"F"` or `"C"`, for display. Temperatures are whole numbers in that unit.
+- `wind_unit`: `"mph"` or `"kmh"`. `wind` is already in that unit, and it does not have to match
+  `unit` (Fahrenheit with km/h is allowed). If `wind_unit` is left out, treat the wind as mph
+  when `unit` is `"F"` and km/h when `unit` is `"C"`.
 - `code`: a WMO weather interpretation code, as returned by Open-Meteo's `weather_code`
   (0 clear, 1-3 mainly clear to overcast, 45/48 fog, 51-57 drizzle, 61-67 rain, 71-77 snow,
   80-82 showers, 85/86 snow showers, 95-99 thunderstorm).
@@ -161,7 +164,7 @@ Both reply with every setting:
 {"t": "settings.get", "re": 3, "ok": true, "settings": {
   "brightness": 60, "screen_timeout": 5, "raise_to_wake": true, "tap_to_wake": true,
   "notify_vibrate": true, "touch_feedback": true, "clock_24h": false, "dnd": false,
-  "bluetooth": true, "step_goal": 8000
+  "bluetooth": true, "step_goal": 8000, "temp_unit": "F", "wind_unit": "mph"
 }}
 ```
 
@@ -176,6 +179,16 @@ Both reply with every setting:
 | `dnd` | Do not disturb (always off after a restart) |
 | `bluetooth` | read only; turning it off would cut off the app |
 | `step_goal` | daily step goal, 1000-50000 |
+| `temp_unit` | `"F"` or `"C"`. Default `"F"` |
+| `wind_unit` | `"mph"` or `"kmh"`. Default `"mph"`. Independent of `temp_unit` |
+
+`temp_unit` and `wind_unit` are the user's preference. The phone fetches the forecast in those
+units and sends numbers that are already converted. The watch stores the preference, shows it in
+Settings, and sends `settings.changed` when it changes. It does not convert temperatures or wind
+itself. Label the forecast from that forecast's `unit` and `wind_unit`, and keep showing the
+previous forecast with its own labels until the next `weather.set` arrives. Anything other than
+`"F"` / `"C"` or `"mph"` / `"kmh"` is left unchanged. Older watches omit these two fields; the
+phone then keeps its own choice and still labels `weather.set` with `unit` and `wind_unit`.
 
 `settings.set` only changes the settings it includes. Out-of-range values are clamped. When a
 setting is changed on the watch itself, it sends:
