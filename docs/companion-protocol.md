@@ -93,7 +93,7 @@ Reply:
 
 ```json
 {"t": "hello", "re": 1, "ok": true, "protocol": 1, "name": "K-Watch",
- "device": "LilyGo T-Watch S3", "firmware": "v0.4-12-gabcdef",
+ "device": "LilyGo T-Watch S3", "firmware": "0.5",
  "features": ["weather", "settings", "health", "diagnostics", "find"]}
 ```
 
@@ -229,7 +229,7 @@ Reply:
 
 ```json
 {"t": "diag.get", "re": 6, "ok": true,
- "firmware": "v0.4-12-gabcdef", "uptime": 86400, "time": 1790000000,
+ "firmware": "0.5", "uptime": 86400, "time": 1790000000,
  "restart_reason": "power-on",
  "heap_free": 180000, "heap_min": 150000, "psram_free": 8000000,
  "battery": {"percent": 85, "voltage": 4010, "charging": false, "usb": false},
