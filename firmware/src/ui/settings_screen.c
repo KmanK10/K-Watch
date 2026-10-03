@@ -24,16 +24,35 @@ typedef enum {
     ROW_CLOCK_24H,
     ROW_BLUETOOTH,
     ROW_DND,
+    ROW_TOUCH_FEEDBACK,
     ROW_COUNT,
 } row_id_t;
 
 static lv_obj_t *s_page;
 static lv_obj_t *s_values[ROW_COUNT];   // value label or switch
 static lv_obj_t *s_brightness_slider;
-static lv_obj_t *s_forget_label;
 static lv_obj_t *s_about;
-static lv_timer_t *s_confirm_timer;
-static void (*s_on_forget)(void);
+
+// A red row that needs a second tap within CONFIRM_MS before it acts.
+typedef struct {
+    const char *text;
+    const char *confirm_text;
+    const char *done_text;
+    lv_obj_t *label;
+    lv_timer_t *timer;
+    void (*cb)(void);
+} confirm_row_t;
+
+static confirm_row_t s_forget = {
+    .text = "Forget iPhone",
+    .confirm_text = "Tap again to forget",
+    .done_text = "Forgotten",
+};
+static confirm_row_t s_reset = {
+    .text = "Factory reset",
+    .confirm_text = "Tap again to erase all",
+    .done_text = "Erasing...",
+};
 
 static uint8_t next_step(const uint8_t *steps, size_t count, uint8_t current)
 {
@@ -54,6 +73,7 @@ static bool *toggle_field(settings_t *s, row_id_t row)
     case ROW_CLOCK_24H: return &s->clock_24h;
     case ROW_BLUETOOTH: return &s->bluetooth;
     case ROW_DND: return &s->dnd;
+    case ROW_TOUCH_FEEDBACK: return &s->touch_feedback;
     default: return NULL;
     }
 }
@@ -98,28 +118,32 @@ static void on_brightness(lv_event_t *e)
     lv_label_set_text_fmt(s_values[ROW_BRIGHTNESS], "%d%%", s.brightness);
 }
 
-static void end_confirm(lv_timer_t *t)
+static void end_confirm(confirm_row_t *c)
 {
-    (void)t;
-    if (s_confirm_timer) {
-        lv_timer_delete(s_confirm_timer);
-        s_confirm_timer = NULL;
+    if (c->timer) {
+        lv_timer_delete(c->timer);
+        c->timer = NULL;
     }
-    lv_label_set_text(s_forget_label, "Forget iPhone");
+    lv_label_set_text(c->label, c->text);
 }
 
-static void on_forget(lv_event_t *e)
+static void on_confirm_timeout(lv_timer_t *t)
 {
-    (void)e;
-    if (!s_confirm_timer) {
-        lv_label_set_text(s_forget_label, "Tap again to forget");
-        s_confirm_timer = lv_timer_create(end_confirm, CONFIRM_MS, NULL);
+    end_confirm(lv_timer_get_user_data(t));
+}
+
+static void on_confirm_row(lv_event_t *e)
+{
+    confirm_row_t *c = lv_event_get_user_data(e);
+    if (!c->timer) {
+        lv_label_set_text(c->label, c->confirm_text);
+        c->timer = lv_timer_create(on_confirm_timeout, CONFIRM_MS, c);
         return;
     }
-    end_confirm(NULL);
-    lv_label_set_text(s_forget_label, "Forgotten");
-    if (s_on_forget) {
-        s_on_forget();
+    end_confirm(c);
+    lv_label_set_text(c->label, c->done_text);
+    if (c->cb) {
+        c->cb();
     }
 }
 
@@ -192,6 +216,15 @@ static void add_toggle_row(const char *name, row_id_t id)
     s_values[id] = sw;
 }
 
+static void add_confirm_row(confirm_row_t *c)
+{
+    lv_obj_t *row = add_row("", on_confirm_row, c);
+    c->label = lv_obj_get_child(row, 0);
+    lv_label_set_text(c->label, c->text);
+    lv_obj_set_style_text_color(c->label, lv_palette_main(LV_PALETTE_RED), 0);
+    lv_obj_align(c->label, LV_ALIGN_CENTER, 0, 0);
+}
+
 void settings_screen_create(lv_obj_t *parent)
 {
     s_page = parent;
@@ -212,13 +245,11 @@ void settings_screen_create(lv_obj_t *parent)
     add_toggle_row("Raise to wake", ROW_RAISE_TO_WAKE);
     add_toggle_row("Tap to wake", ROW_TAP_TO_WAKE);
     add_toggle_row("Buzz on notify", ROW_NOTIFY_VIBRATE);
+    add_toggle_row("Touch feedback", ROW_TOUCH_FEEDBACK);
     add_toggle_row("24-hour clock", ROW_CLOCK_24H);
 
-    lv_obj_t *forget = add_row("", on_forget, NULL);
-    s_forget_label = lv_obj_get_child(forget, 0);
-    lv_label_set_text(s_forget_label, "Forget iPhone");
-    lv_obj_set_style_text_color(s_forget_label, lv_palette_main(LV_PALETTE_RED), 0);
-    lv_obj_align(s_forget_label, LV_ALIGN_CENTER, 0, 0);
+    add_confirm_row(&s_forget);
+    add_confirm_row(&s_reset);
 
     s_about = ui_label(s_page, &lv_font_montserrat_14, UI_COLOR_DIM);
     lv_obj_set_width(s_about, CONTENT_W);
@@ -240,5 +271,10 @@ void settings_screen_set_about(const char *text)
 
 void settings_screen_on_forget(void (*cb)(void))
 {
-    s_on_forget = cb;
+    s_forget.cb = cb;
+}
+
+void settings_screen_on_factory_reset(void (*cb)(void))
+{
+    s_reset.cb = cb;
 }

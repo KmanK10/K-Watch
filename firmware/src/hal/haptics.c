@@ -23,6 +23,7 @@
 
 // Effect numbers from the DRV2605 ROM library (datasheet table 11.2).
 #define FX_STRONG_CLICK  1
+#define FX_SHARP_CLICK   4
 #define FX_STRONG_BUZZ   14
 #define FX_BUZZ          47
 
@@ -33,6 +34,7 @@ typedef struct {
 
 static const pattern_t s_patterns[] = {
     [HAPTIC_TAP]    = {{FX_STRONG_CLICK, 0}, 300},
+    [HAPTIC_TICK]   = {{FX_SHARP_CLICK, 0}, 300},
     [HAPTIC_NOTIFY] = {{FX_BUZZ, WAIT(150), FX_BUZZ, 0}, 800},
     [HAPTIC_ALERT]  = {{FX_STRONG_BUZZ, WAIT(300), FX_STRONG_BUZZ, WAIT(300), FX_STRONG_BUZZ, 0}, 2000},
 };
@@ -41,18 +43,28 @@ static const char *TAG = "haptics";
 static i2c_master_dev_handle_t s_dev;
 static esp_timer_handle_t s_off_timer;
 
+static volatile bool s_powered;
+static bool s_touch_feedback = true;
+
 static void power_off_cb(void *arg)
 {
     (void)arg;
+    s_powered = false;
     pmu_set_haptics_power(false);
 }
 
 static esp_err_t power_up(void)
 {
+    // Back-to-back clicks (a scroll wheel) find it still on and skip the wait.
+    if (s_powered) {
+        return ESP_OK;
+    }
     pmu_set_haptics_power(true);
     // The chip needs about 250us after power-up before it answers.
     vTaskDelay(pdMS_TO_TICKS(2));
-    return i2c_reg_write(s_dev, REG_MODE, MODE_INTTRIG);
+    esp_err_t err = i2c_reg_write(s_dev, REG_MODE, MODE_INTTRIG);
+    s_powered = err == ESP_OK;
+    return err;
 }
 
 esp_err_t haptics_init(void)
@@ -66,6 +78,7 @@ esp_err_t haptics_init(void)
     if (err == ESP_OK) {
         err = i2c_reg_read(s_dev, REG_STATUS, &status, 1);
     }
+    s_powered = false;
     pmu_set_haptics_power(false);
 
     if (err != ESP_OK) {
@@ -83,10 +96,14 @@ void haptics_play(haptic_pattern_t pattern)
     if (!s_dev || pattern >= sizeof(s_patterns) / sizeof(s_patterns[0])) {
         return;
     }
+    if (!s_touch_feedback && (pattern == HAPTIC_TAP || pattern == HAPTIC_TICK)) {
+        return;
+    }
     const pattern_t *p = &s_patterns[pattern];
 
     esp_timer_stop(s_off_timer);
     if (power_up() != ESP_OK) {
+        s_powered = false;
         pmu_set_haptics_power(false);
         return;
     }
@@ -99,4 +116,9 @@ void haptics_play(haptic_pattern_t pattern)
     }
     i2c_reg_write(s_dev, REG_GO, 1);
     esp_timer_start_once(s_off_timer, (uint64_t)p->duration_ms * 1000);
+}
+
+void haptics_set_touch_feedback(bool on)
+{
+    s_touch_feedback = on;
 }

@@ -24,7 +24,8 @@ EXE = os.path.join(BUILD, "k-watch-sim.exe")
 INCLUDES = [SIM, os.path.join(SIM, "stubs"), os.path.join(FW, "src"), os.path.join(FW, "src", "hal"), LVGL]
 CFLAGS = ["-target", "x86_64-windows-gnu", "-std=gnu11", "-O2", "-g0",
           "-DLV_CONF_INCLUDE_SIMPLE", "-Wno-everything"]
-OUR_CFLAGS = ["-Wall", "-Wno-unused-function"]
+# MinGW only declares localtime_r and friends when asked.
+OUR_CFLAGS = ["-Wall", "-Wno-unused-function", "-D_POSIX_THREAD_SAFE_FUNCTIONS=200112L"]
 
 
 def find_zig():
@@ -58,7 +59,7 @@ def main():
 
     lvgl_sources = glob.glob(os.path.join(LVGL, "src", "**", "*.c"), recursive=True)
     our_sources = (glob.glob(os.path.join(FW, "src", "ui", "*.c")) +
-                   [os.path.join(FW, "src", "settings.c")] +
+                   [os.path.join(FW, "src", "settings.c"), os.path.join(FW, "src", "alarms.c")] +
                    glob.glob(os.path.join(SIM, "*.c")))
 
     conf_time = os.path.getmtime(os.path.join(SIM, "lv_conf.h"))

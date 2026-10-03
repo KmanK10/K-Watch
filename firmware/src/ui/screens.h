@@ -21,5 +21,5 @@ void ui_show_home(bool animate);
 bool ui_show_screen(const char *name, bool animate);
 
 void ui_show_overlay(lv_obj_t *screen);
-// Slides back to whichever grid screen was showing.
+// Slides back to the screen that was showing before this overlay opened.
 void ui_close_overlay(void);

@@ -1,11 +1,13 @@
 #include "settings.h"
 
+#include <stddef.h>
 #include <string.h>
 
 #include "esp_log.h"
 #include "nvs.h"
 
-// Bump when the layout of settings_t changes, so old saved settings are ignored.
+// Bump when existing fields of settings_t change, so old saved settings are ignored.
+// New fields go at the end instead: older, shorter saves load with the new fields at their defaults.
 #define SETTINGS_VERSION 2
 
 static const char *TAG = "settings";
@@ -19,6 +21,7 @@ static settings_t s_settings = {
     .clock_24h = false,
     .bluetooth = true,
     .dnd = false,
+    .touch_feedback = true,
 };
 static void (*s_on_change)(const settings_t *s);
 static bool s_unsaved;
@@ -34,9 +37,9 @@ void settings_init(void)
     if (nvs_open("settings", NVS_READONLY, &h) != ESP_OK) {
         return;
     }
-    saved_t saved;
+    saved_t saved = {.settings = s_settings};
     size_t len = sizeof(saved);
-    if (nvs_get_blob(h, "v", &saved, &len) == ESP_OK && len == sizeof(saved) &&
+    if (nvs_get_blob(h, "v", &saved, &len) == ESP_OK && len > offsetof(saved_t, settings) &&
         saved.version == SETTINGS_VERSION) {
         s_settings = saved.settings;
     }

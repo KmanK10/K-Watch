@@ -194,6 +194,7 @@ static void on_tile_changed(lv_event_t *e)
 
 void ui_init(void)
 {
+    ui_click_haptics();
     s_main = lv_screen_active();
     lv_obj_set_style_bg_color(s_main, lv_color_black(), 0);
     lv_obj_set_scrollable(s_main, false);
@@ -239,8 +240,25 @@ void ui_init(void)
     lv_obj_add_event_cb(s_tileview, on_scroll_end, LV_EVENT_SCROLL_END, NULL);
 }
 
+// Screens under the current overlay, so closing it goes back one step. The grid is the bottom.
+#define BACK_STACK_MAX 6
+static lv_obj_t *s_back[BACK_STACK_MAX];
+static int s_back_count;
+
+static void back_remove(lv_obj_t *screen)
+{
+    for (int i = 0; i < s_back_count; i++) {
+        if (s_back[i] == screen) {
+            memmove(&s_back[i], &s_back[i + 1], (s_back_count - i - 1) * sizeof(s_back[0]));
+            s_back_count--;
+            i--;
+        }
+    }
+}
+
 void ui_show_home(bool animate)
 {
+    s_back_count = 0;
     if (lv_screen_active() != s_main) {
         lv_screen_load(s_main);
     }
@@ -251,6 +269,7 @@ bool ui_show_screen(const char *name, bool animate)
 {
     for (size_t i = 0; i < SCREEN_COUNT; i++) {
         if (strcmp(s_screens[i].name, name) == 0) {
+            s_back_count = 0;
             if (lv_screen_active() != s_main) {
                 lv_screen_load(s_main);
             }
@@ -263,16 +282,27 @@ bool ui_show_screen(const char *name, bool animate)
 
 void ui_show_overlay(lv_obj_t *screen)
 {
-    if (lv_screen_active() == screen) {
+    lv_obj_t *current = lv_screen_active();
+    if (current == screen) {
         return;
     }
+    back_remove(screen);
+    back_remove(current);
+    if (s_back_count == BACK_STACK_MAX) {
+        memmove(&s_back[0], &s_back[1], (BACK_STACK_MAX - 1) * sizeof(s_back[0]));
+        s_back_count--;
+    }
+    s_back[s_back_count++] = current;
     lv_screen_load_anim(screen, LV_SCREEN_LOAD_ANIM_MOVE_LEFT, OVERLAY_ANIM_MS, 0, false);
 }
 
 void ui_close_overlay(void)
 {
-    if (lv_screen_active() == s_main) {
+    lv_obj_t *current = lv_screen_active();
+    if (current == s_main) {
         return;
     }
-    lv_screen_load_anim(s_main, LV_SCREEN_LOAD_ANIM_MOVE_RIGHT, OVERLAY_ANIM_MS, 0, false);
+    back_remove(current);
+    lv_obj_t *prev = s_back_count ? s_back[--s_back_count] : s_main;
+    lv_screen_load_anim(prev, LV_SCREEN_LOAD_ANIM_MOVE_RIGHT, OVERLAY_ANIM_MS, 0, false);
 }

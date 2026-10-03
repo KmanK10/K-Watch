@@ -14,6 +14,7 @@ typedef struct {
     bool clock_24h;
     bool bluetooth;              // always on after a restart
     bool dnd;                    // notifications go quietly into the list; always off after a restart
+    bool touch_feedback;         // clicks for taps, scroll wheels and dragging
 } settings_t;
 
 void settings_init(void);

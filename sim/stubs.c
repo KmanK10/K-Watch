@@ -33,8 +33,23 @@ void phone_set_enabled(bool enabled)
     printf("[phone] Bluetooth %s\n", enabled ? "on" : "off");
 }
 
+static bool s_touch_feedback = true;
+
 void haptics_play(haptic_pattern_t pattern)
 {
-    static const char *const NAMES[] = {"tap", "notify", "alert"};
+    static const char *const NAMES[] = {
+        [HAPTIC_TAP] = "tap",
+        [HAPTIC_TICK] = "tick",
+        [HAPTIC_NOTIFY] = "notify",
+        [HAPTIC_ALERT] = "alert",
+    };
+    if (!s_touch_feedback && (pattern == HAPTIC_TAP || pattern == HAPTIC_TICK)) {
+        return;
+    }
     printf("[buzz] %s\n", NAMES[pattern]);
+}
+
+void haptics_set_touch_feedback(bool on)
+{
+    s_touch_feedback = on;
 }

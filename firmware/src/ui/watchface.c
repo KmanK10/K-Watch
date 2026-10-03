@@ -11,6 +11,7 @@ static lv_obj_t *s_date;
 static lv_obj_t *s_power;
 static lv_obj_t *s_steps;
 static lv_obj_t *s_dnd;
+static lv_obj_t *s_alarm;
 
 static int s_last_minute = -1;
 static int s_last_day = -1;
@@ -38,6 +39,11 @@ void watchface_create(lv_obj_t *parent)
     lv_obj_align(s_bluetooth, LV_ALIGN_TOP_LEFT, 10, 6);
     lv_obj_set_hidden(s_bluetooth, true);
 
+    s_alarm = ui_label(parent, &lv_font_montserrat_14, UI_COLOR_DIM);
+    lv_label_set_text(s_alarm, LV_SYMBOL_BELL);
+    lv_obj_align(s_alarm, LV_ALIGN_TOP_LEFT, 32, 8);
+    lv_obj_set_hidden(s_alarm, true);
+
     s_dnd = ui_label(parent, &lv_font_montserrat_14, lv_color_hex(0x9C8CFF));
     lv_label_set_text(s_dnd, "DND");
     lv_obj_align(s_dnd, LV_ALIGN_TOP_MID, 0, 7);
@@ -47,6 +53,13 @@ void watchface_create(lv_obj_t *parent)
 void watchface_set_dnd(bool on)
 {
     lv_obj_set_hidden(s_dnd, !on);
+}
+
+void watchface_set_alarm(bool on)
+{
+    if (lv_obj_is_hidden(s_alarm) == on) {
+        lv_obj_set_hidden(s_alarm, !on);
+    }
 }
 
 void watchface_set_connected(bool connected)

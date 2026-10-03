@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <time.h>
 
+#include "alarms.h"
 #include "board.h"
 #include "display.h"
 #include "esp_log.h"
@@ -12,6 +13,7 @@
 #include "haptics.h"
 #include "imu.h"
 #include "lvgl.h"
+#include "nvs_flash.h"
 #include "phone/phone.h"
 #include "pmu.h"
 #include "esp_app_desc.h"
@@ -41,6 +43,7 @@ static QueueSetHandle_t s_event_set;
 
 static bool s_screen_on;
 static bool s_dimmed;
+static bool s_alarm_ringing;
 static uint32_t s_timeout_ms;
 static int64_t s_screen_on_since_us;
 
@@ -55,6 +58,7 @@ static void refresh_ui(void)
     pmu_get_status(&p);
     watchface_set_power(p.battery_percent, p.charging, p.usb_connected);
     watchface_set_steps(steps_today());
+    watchface_set_alarm(alarms_any_enabled());
 }
 
 static void refresh_timer_cb(lv_timer_t *timer)
@@ -93,6 +97,11 @@ static void screen_off(void)
         return;
     }
     display_sleep();
+    // An alarm nobody answered (or silenced with the button) rings again in a few minutes.
+    if (s_alarm_ringing && alert_is_showing()) {
+        alarms_snooze(true);
+    }
+    s_alarm_ringing = false;
     // The next wake should show the time, not an old notification or alert.
     alert_dismiss();
     ui_show_home(false);
@@ -178,7 +187,7 @@ static void handle_phone_event(const phone_event_t *evt)
         ESP_LOGI(TAG, "pairing code shown");
         pairing_show(evt->passkey);
         screen_on_for(NO_TIMEOUT);
-        haptics_play(HAPTIC_TAP);
+        haptics_play(HAPTIC_NOTIFY);
         break;
     case PHONE_EVT_SECURED:
         ESP_LOGI(TAG, "phone link secured");
@@ -216,6 +225,7 @@ static void handle_phone_event(const phone_event_t *evt)
         strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &evt->time);
         ESP_LOGI(TAG, "time from phone: %s", buf);
         board_set_time(&evt->time);
+        alarms_time_changed();
         break;
     }
     }
@@ -260,9 +270,34 @@ static void apply_settings(const settings_t *s)
     watchface_set_24h(s->clock_24h);
     watchface_set_dnd(s->dnd);
     phone_set_enabled(s->bluetooth);
+    haptics_set_touch_feedback(s->touch_feedback);
     if (s_screen_on && s_timeout_ms != NO_TIMEOUT) {
         s_timeout_ms = s->screen_timeout_s * 1000;
     }
+}
+
+static void stop_alarm(void)
+{
+    s_alarm_ringing = false;
+    alarms_stop();
+    screen_on();
+}
+
+static void snooze_alarm(void)
+{
+    s_alarm_ringing = false;
+    alarms_snooze(false);
+    screen_on();
+}
+
+static void ring_alarm(size_t which)
+{
+    char time[16];
+    alarms_format_time(alarms_get(which), time, sizeof(time));
+    ESP_LOGI(TAG, "alarm %s", time);
+    alert_show("Alarm", time, stop_alarm, snooze_alarm);
+    s_alarm_ringing = true;
+    screen_on_for(ALERT_TIMEOUT_MS);
 }
 
 // Why the watch last restarted, if it wasn't a normal power-on or flash.
@@ -287,6 +322,23 @@ static void on_flashlight(uint8_t percent)
     }
 }
 
+static void erase_and_restart(lv_timer_t *t)
+{
+    (void)t;
+    ESP_LOGW(TAG, "factory reset");
+    nvs_flash_erase();
+    esp_restart();
+}
+
+// Wipes settings, alarms, steps, the app order and the iPhone pairing, then starts fresh.
+static void factory_reset(void)
+{
+    phone_forget();
+    // Long enough for "Erasing..." to be drawn and the phone link to close.
+    lv_timer_t *t = lv_timer_create(erase_and_restart, 500, NULL);
+    lv_timer_set_repeat_count(t, 1);
+}
+
 void app_main(void)
 {
     s_board_events = xQueueCreate(8, sizeof(board_event_t));
@@ -298,11 +350,13 @@ void app_main(void)
     ESP_ERROR_CHECK(board_init(s_board_events));
     steps_init();
     settings_init();
+    alarms_init();
 
     ui_init();
     apply_settings(settings_get());
     settings_on_change(apply_settings);
     settings_screen_on_forget(phone_forget);
+    settings_screen_on_factory_reset(factory_reset);
     flashlight_on_change(on_flashlight);
     char about[96];
     const char *restart = abnormal_restart_reason();
@@ -327,12 +381,19 @@ void app_main(void)
         wait = until_midnight < wait ? until_midnight : wait;
         TickType_t until_timer = countdown_ticks_until_done();
         wait = until_timer < wait ? until_timer : wait;
+        TickType_t until_alarm = alarms_ticks_until_next();
+        wait = until_alarm < wait ? until_alarm : wait;
         QueueSetMemberHandle_t ready = xQueueSelectFromSet(s_event_set, wait);
         steps_check_day();
         if (countdown_check_done()) {
             ESP_LOGI(TAG, "timer done");
-            alert_show("Time's up", "Timer finished", screen_on);
+            s_alarm_ringing = false;
+            alert_show("Time's up", "Timer finished", screen_on, NULL);
             screen_on_for(ALERT_TIMEOUT_MS);
+        }
+        size_t alarm;
+        if (alarms_check_due(&alarm)) {
+            ring_alarm(alarm);
         }
 
         if (ready == s_board_events) {

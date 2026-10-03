@@ -12,7 +12,7 @@
 #define LV_USE_STDLIB_STRING        LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF       LV_STDLIB_BUILTIN
 // The watch has 48 KB. Pointers are twice as big on a PC, so objects take more room here.
-#define LV_MEM_SIZE                 (96 * 1024)
+#define LV_MEM_SIZE                 (512 * 1024)
 
 #define LV_DRAW_LAYER_SIMPLE_BUF_SIZE  (24 * 1024)
 #define LV_OBJ_STYLE_CACHE          1

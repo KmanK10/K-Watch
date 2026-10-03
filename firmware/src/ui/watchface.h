@@ -15,3 +15,5 @@ void watchface_set_steps(uint32_t steps);
 void watchface_set_connected(bool connected);
 void watchface_set_24h(bool on);
 void watchface_set_dnd(bool on);
+// Shows a bell while any alarm is on.
+void watchface_set_alarm(bool on);

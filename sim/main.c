@@ -19,6 +19,8 @@
 #include "ui/music.h"
 #include "ui/notify.h"
 #include "ui/pairing.h"
+#include "alarms.h"
+#include "haptics.h"
 #include "settings.h"
 #include "ui/flashlight.h"
 #include "ui/screens.h"
@@ -184,13 +186,16 @@ static void refresh_watchface(void)
     watchface_set_power(76, false, false);
     watchface_set_steps(4321);
     watchface_set_connected(s_connected);
+    watchface_set_alarm(alarms_any_enabled());
 }
 
 static void apply_settings(const settings_t *s)
 {
-    printf("settings: brightness %d%%, timeout %d s, raise %d, tap %d, buzz %d, 24h %d, bluetooth %d, dnd %d\n",
+    printf("settings: brightness %d%%, timeout %d s, raise %d, tap %d, buzz %d, 24h %d, bluetooth %d, dnd %d, "
+           "touch %d\n",
            s->brightness, s->screen_timeout_s, s->raise_to_wake, s->tap_to_wake, s->notify_vibrate,
-           s->clock_24h, s->bluetooth, s->dnd);
+           s->clock_24h, s->bluetooth, s->dnd, s->touch_feedback);
+    haptics_set_touch_feedback(s->touch_feedback);
     watchface_set_24h(s->clock_24h);
     watchface_set_dnd(s->dnd);
     refresh_watchface();
@@ -210,12 +215,19 @@ static void forget_phone(void)
     phone_forget();
 }
 
+static void factory_reset(void)
+{
+    printf("[sim] factory reset: would erase flash and restart\n");
+}
+
 static void app_init(void)
 {
     settings_init();
+    alarms_init();
     ui_init();
     settings_on_change(apply_settings);
     settings_screen_on_forget(forget_phone);
+    settings_screen_on_factory_reset(factory_reset);
     flashlight_on_change(on_flashlight);
     settings_screen_set_about("K-Watch simulator");
     refresh_watchface();
@@ -225,6 +237,24 @@ static void app_init(void)
         phone_notification_t n = make_notification(i, true);
         notify_add(&n);
     }
+}
+
+static void stop_alarm(void)
+{
+    alarms_stop();
+}
+
+static void snooze_alarm(void)
+{
+    alarms_snooze(false);
+    printf("alarm snoozed for 9 minutes\n");
+}
+
+static void ring_alarm(size_t which)
+{
+    char time[16];
+    alarms_format_time(alarms_get(which), time, sizeof(time));
+    alert_show("Alarm", time, stop_alarm, snooze_alarm);
 }
 
 static void show_new_notification(const phone_notification_t *n)
@@ -245,7 +275,11 @@ static void app_tick(void)
         refresh_watchface();
     }
     if (countdown_check_done()) {
-        alert_show("Time's up", "Timer finished", NULL);
+        alert_show("Time's up", "Timer finished", NULL, NULL);
+    }
+    size_t alarm;
+    if (alarms_check_due(&alarm)) {
+        ring_alarm(alarm);
     }
 }
 
@@ -279,7 +313,7 @@ static void on_key(int key)
         }
         break;
     case 'P': pairing_show(123456); break;
-    case 'A': alert_show("Time's up", "Timer finished", NULL); break;
+    case 'A': alert_show("Time's up", "Timer finished", NULL, NULL); break;
     case 'D':
         s_connected = !s_connected;
         music_set_connected(s_connected);
@@ -434,6 +468,26 @@ static void tap_at(int32_t x, int32_t y)
     advance(80);
 }
 
+// Touch down, hold for `hold_ms`, slide to (x2, y2) in a few steps, and keep holding there.
+static void hold_and_drag(int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t hold_ms)
+{
+    s_touch.x = x1;
+    s_touch.y = y1;
+    s_touch.pressed = true;
+    advance(hold_ms);
+    for (int i = 1; i <= 8; i++) {
+        s_touch.x = x1 + (x2 - x1) * i / 8;
+        s_touch.y = y1 + (y2 - y1) * i / 8;
+        advance(40);
+    }
+}
+
+static void release(void)
+{
+    s_touch.pressed = false;
+    advance(80);
+}
+
 static void tap(const char *label)
 {
     lv_obj_t *btn = find_button(lv_screen_active(), label);
@@ -484,7 +538,7 @@ static int run_shots(const char *dir)
 
     ui_show_screen("apps", false);
     shot(dir, "14-apps");
-    tap(LV_SYMBOL_BELL);
+    tap(LV_SYMBOL_REFRESH);
     shot(dir, "06-timer");
     tap(LV_SYMBOL_PLAY);
     advance(83 * 1000);
@@ -507,6 +561,22 @@ static int run_shots(const char *dir)
     ui_close_overlay();
     advance(600);
 
+    alarms_add(&(alarm_t){.hour = 7, .minute = 0, .days = 0x3E, .enabled = true});
+    alarms_add(&(alarm_t){.hour = 9, .minute = 30, .days = 0x41, .enabled = false});
+    ui_show_screen("apps", false);
+    tap(LV_SYMBOL_BELL);
+    shot(dir, "18-alarms");
+    tap("7:00 AM");
+    shot(dir, "19-alarm-edit");
+    ui_close_overlay();
+    advance(600);
+    tap(LV_SYMBOL_PLUS " Add alarm");
+    shot(dir, "20-alarm-new");
+    ui_show_home(false);
+    ring_alarm(0);
+    shot(dir, "21-alarm-ringing");
+    alert_dismiss();
+
     ui_show_screen("settings", false);
     shot(dir, "11-settings");
     lv_obj_t *page = lv_obj_get_parent(find_button(lv_screen_active(), "Brightness"));
@@ -520,6 +590,12 @@ static int run_shots(const char *dir)
     tap("Do not disturb");
 
     ui_show_screen("apps", false);
+    advance(600);
+    hold_and_drag(42, 72, 198, 160, 700);   // Flashlight to the last slot
+    shot(dir, "22-apps-dragging");
+    release();
+    shot(dir, "23-apps-rearranged");
+
     tap(LV_SYMBOL_CHARGE);
     shot(dir, "15-flashlight");
     tap_at(120, 60);    // the light: show the controls
@@ -530,7 +606,7 @@ static int run_shots(const char *dir)
     ui_close_overlay();
     advance(600);
 
-    alert_show("Time's up", "Timer finished", NULL);
+    alert_show("Time's up", "Timer finished", NULL, NULL);
     shot(dir, "09-alert");
     alert_dismiss();
     pairing_show(123456);
