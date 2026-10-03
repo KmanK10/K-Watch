@@ -21,6 +21,8 @@ typedef enum {
     PHONE_CAT_SOCIAL = 4,
     PHONE_CAT_SCHEDULE = 5,
     PHONE_CAT_EMAIL = 6,
+    // Not in Apple's ANCS spec, but sent for a call in progress; its negative action hangs up.
+    PHONE_CAT_ACTIVE_CALL = 12,
 } phone_category_t;
 
 typedef struct {

@@ -208,7 +208,8 @@ static void handle_phone_event(const phone_event_t *evt)
         }
         notify_show_card(n->uid);
         screen_on_for(NOTIFY_TIMEOUT_MS);
-        if (settings_get()->notify_vibrate) {
+        // A call that just started is already in hand on the phone; no need to buzz about it.
+        if (settings_get()->notify_vibrate && n->category != PHONE_CAT_ACTIVE_CALL) {
             haptics_play(n->category == PHONE_CAT_INCOMING_CALL ? HAPTIC_ALERT : HAPTIC_NOTIFY);
         }
         break;

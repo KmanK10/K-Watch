@@ -293,9 +293,10 @@ static void finish_request(void)
 static void deliver_ready(void)
 {
     const phone_notification_t *n = &s_ready.notification;
-    ESP_LOGI(TAG, "notification %lu from %s%s%s", (unsigned long)n->uid,
-             n->app_name[0] ? n->app_name : n->app_id, n->pre_existing ? " (already on phone)" : "",
-             n->silent ? " (silent)" : "");
+    ESP_LOGI(TAG, "notification %lu from %s (%s), category %d%s%s%s%s", (unsigned long)n->uid,
+             n->app_name[0] ? n->app_name : n->app_id, n->app_id, n->category,
+             n->pre_existing ? " (already on phone)" : "", n->silent ? " (silent)" : "",
+             n->has_positive ? " +action" : "", n->has_negative ? " -action" : "");
     post(&s_ready);
     finish_request();
 }

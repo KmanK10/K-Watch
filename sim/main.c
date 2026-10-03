@@ -535,6 +535,13 @@ static int run_shots(const char *dir)
     phone_notification_t call = make_call();
     show_new_notification(&call);
     shot(dir, "05-incoming-call");
+    notify_remove(call.uid);
+    phone_notification_t active = make_call();
+    active.category = PHONE_CAT_ACTIVE_CALL;
+    active.has_positive = false;
+    show_new_notification(&active);
+    shot(dir, "05-active-call");
+    notify_remove(active.uid);
 
     ui_show_screen("apps", false);
     shot(dir, "14-apps");

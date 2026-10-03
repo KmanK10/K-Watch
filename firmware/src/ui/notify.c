@@ -10,6 +10,9 @@
 
 #define LIST_MAX     10
 #define CONTENT_W    200
+// Answering a call removes the incoming call and adds an active one straight after. Waiting
+// this long before closing lets the card change over instead of sliding away.
+#define CLOSE_DELAY_MS 1000
 
 static phone_notification_t s_items[LIST_MAX];   // newest first
 static int s_count;
@@ -21,6 +24,7 @@ static lv_obj_t *s_card_subtitle;
 static lv_obj_t *s_card_message;
 static lv_obj_t *s_card_actions;
 static uint32_t s_card_uid;
+static lv_timer_t *s_close_timer;
 
 static lv_obj_t *s_list;
 static lv_obj_t *s_list_items;
@@ -61,6 +65,23 @@ static int find(uint32_t uid)
 static bool card_showing(void)
 {
     return s_card && lv_screen_active() == s_card;
+}
+
+static void cancel_close(void)
+{
+    if (s_close_timer) {
+        lv_timer_delete(s_close_timer);
+        s_close_timer = NULL;
+    }
+}
+
+static void on_close_timer(lv_timer_t *t)
+{
+    (void)t;
+    s_close_timer = NULL;
+    if (card_showing()) {
+        ui_close_overlay();
+    }
 }
 
 // ---- Card (overlay) ----
@@ -132,11 +153,14 @@ void notify_show_card(uint32_t uid)
     if (!s_card) {
         create_card();
     }
+    cancel_close();
     s_card_uid = uid;
 
-    bool call = n->category == PHONE_CAT_INCOMING_CALL;
-    if (call) {
+    bool call = n->category == PHONE_CAT_INCOMING_CALL || n->category == PHONE_CAT_ACTIVE_CALL;
+    if (n->category == PHONE_CAT_INCOMING_CALL) {
         lv_label_set_text(s_card_app, LV_SYMBOL_CALL " Incoming call");
+    } else if (n->category == PHONE_CAT_ACTIVE_CALL) {
+        lv_label_set_text(s_card_app, LV_SYMBOL_CALL " On a call");
     } else {
         set_ascii_text(s_card_app, app_display_name(n));
     }
@@ -270,8 +294,9 @@ void notify_remove(uint32_t uid)
     s_count--;
     rebuild_list();
 
-    if (card_showing() && s_card_uid == uid) {
-        ui_close_overlay();
+    if (card_showing() && s_card_uid == uid && !s_close_timer) {
+        s_close_timer = lv_timer_create(on_close_timer, CLOSE_DELAY_MS, NULL);
+        lv_timer_set_repeat_count(s_close_timer, 1);
     }
 }
 
@@ -279,6 +304,7 @@ void notify_clear(void)
 {
     s_count = 0;
     rebuild_list();
+    cancel_close();
     if (card_showing()) {
         ui_close_overlay();
     }
