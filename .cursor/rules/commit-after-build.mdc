@@ -1,11 +1,14 @@
 ---
-description: Commit and push after every successful build
+description: Commit and push iOS app work after every successful build
 alwaysApply: true
 ---
 
 # Commit and push after a build
 
-After a build of this project succeeds, commit the changes that build includes and push them to `origin`.
+This applies to the iOS app (`ios/`) only. Firmware work (`firmware/`, `sim/`) is committed and pushed
+only after the user has tested it on the watch and says it works.
+
+After a build of the iOS app succeeds, commit the changes that build includes and push them to `origin`.
 
 - Do this for device, simulator, and test builds that compile the current work.
 - Write one or two sentences on why the change exists, matching recent commit style.
