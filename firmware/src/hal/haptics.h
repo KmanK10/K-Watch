@@ -13,7 +13,7 @@ typedef enum {
 
 esp_err_t haptics_init(void);
 
-// Powers the DRV2605 up, plays the pattern, and powers it down again afterwards.
+// Plays a pattern asynchronously and turns the motor off afterwards.
 void haptics_play(haptic_pattern_t pattern);
 
 // When off, the touch feedback patterns are skipped; notifications and alerts still play.

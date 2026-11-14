@@ -64,8 +64,9 @@ static void irq_pin_init(board_event_t evt)
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << pin,
         .mode = GPIO_MODE_INPUT,
-        .pull_up_en = high ? GPIO_PULLUP_DISABLE : GPIO_PULLUP_ENABLE,
-        .pull_down_en = high ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
+        // ESP32 GPIO34-39 are input-only and have no internal pull resistors.
+        .pull_up_en = !high && GPIO_IS_VALID_OUTPUT_GPIO(pin) ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
+        .pull_down_en = high && GPIO_IS_VALID_OUTPUT_GPIO(pin) ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
         .intr_type = level,
     };
     ESP_ERROR_CHECK(gpio_config(&cfg));

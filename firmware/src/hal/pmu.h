@@ -34,7 +34,7 @@ void pmu_get_status(pmu_status_t *status);
 // The backlight has its own supply rail; cutting it saves more than PWM at 0%.
 void pmu_set_backlight_power(bool on);
 
-// DRV2605 vibration driver supply. It loses its settings when switched off.
+// S3 DRV2605 supply; unused on the 2020 V3's GPIO-driven motor.
 void pmu_set_haptics_power(bool on);
 
 // Cuts all power. A long press of the side button turns the watch back on.

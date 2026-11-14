@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "bma423_config.h"
+#include "board_pins.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -42,10 +43,6 @@
 #define TILT_EN               0x01
 
 #define INT_TILT              0x08
-
-// The sensor sits on the bottom of the board, top-right corner: x<-y, y<-x, z<- -z.
-#define REMAP_BYTE0           0x81
-#define REMAP_BYTE1           0x01
 
 #define CONFIG_CHUNK          32
 
@@ -107,8 +104,8 @@ static esp_err_t configure_features(void)
         return err;
     }
 
-    f[FEAT_AXES_REMAP] = REMAP_BYTE0;
-    f[FEAT_AXES_REMAP + 1] = REMAP_BYTE1;
+    f[FEAT_AXES_REMAP] = BOARD_IMU_REMAP0;
+    f[FEAT_AXES_REMAP + 1] = BOARD_IMU_REMAP1;
     f[FEAT_STEP_CNTR + 1] |= STEP_CNTR_EN;
     f[FEAT_TILT] |= TILT_EN;
 

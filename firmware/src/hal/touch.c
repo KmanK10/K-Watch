@@ -5,6 +5,8 @@
 #include "board_pins.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "i2c_bus.h"
 
 #define FT6336_ADDR      0x38
@@ -22,6 +24,18 @@ static i2c_master_dev_handle_t s_dev;
 
 esp_err_t touch_init(void)
 {
+#if BOARD_TOUCH_RST >= 0
+    gpio_config_t reset = {
+        .pin_bit_mask = 1ULL << BOARD_TOUCH_RST,
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    ESP_ERROR_CHECK(gpio_config(&reset));
+    gpio_set_level(BOARD_TOUCH_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level(BOARD_TOUCH_RST, 1);
+    gpio_sleep_sel_dis(BOARD_TOUCH_RST);
+    vTaskDelay(pdMS_TO_TICKS(200));
+#endif
     s_dev = i2c_bus_add_touch(FT6336_ADDR);
 
     uint8_t id;

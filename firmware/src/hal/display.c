@@ -16,6 +16,7 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 #include "pmu.h"
+#include "soc/soc_caps.h"
 #include "touch.h"
 #include "ui/tint.h"
 
@@ -87,7 +88,12 @@ static void backlight_init(void)
         .duty_resolution = LEDC_TIMER_8_BIT,
         .timer_num = BL_TIMER,
         .freq_hz = BL_FREQ_HZ,
+#if SOC_LEDC_SUPPORT_XTAL_CLOCK
         .clk_cfg = LEDC_USE_XTAL_CLK,
+#else
+        // ESP32 has no LEDC crystal source; REF_TICK stays stable during DFS.
+        .clk_cfg = LEDC_USE_REF_TICK,
+#endif
     };
     ESP_ERROR_CHECK(ledc_timer_config(&timer));
 

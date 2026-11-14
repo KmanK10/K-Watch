@@ -1,6 +1,9 @@
 // DRV2605 haptic driver with an ERM motor, on a PMU rail that is off when idle.
 
 #include "haptics.h"
+#include "board_pins.h"
+
+#if defined(BOARD_TWATCH_S3)
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -122,3 +125,5 @@ void haptics_set_touch_feedback(bool on)
 {
     s_touch_feedback = on;
 }
+
+#endif

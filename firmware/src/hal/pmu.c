@@ -1,6 +1,9 @@
 // AXP2101 power management chip. Register map cross-checked against XPowersLib.
 
 #include "pmu.h"
+#include "board_pins.h"
+
+#if defined(BOARD_TWATCH_S3)
 
 #include "esp_log.h"
 #include "i2c_bus.h"
@@ -169,3 +172,5 @@ void pmu_power_off(void)
 {
     i2c_reg_update(s_dev, REG_COMMON_CFG, COMMON_SOFT_PWROFF, COMMON_SOFT_PWROFF);
 }
+
+#endif

@@ -1,0 +1,16 @@
+# Original ESP32: 16MB DIO flash, quad SPI PSRAM (4MB directly mapped).
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+CONFIG_SPIRAM_SPEED_40M=y
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# BLE and the ESP32 PSRAM cache workaround leave less instruction RAM than S3.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# BLE only. The ESP32 controller holds a light-sleep lock while Bluetooth is
+# enabled because its main crystal cannot run in light sleep on this chip.
+# Frequency scaling and Bluetooth modem sleep remain available.
+CONFIG_BTDM_CTRL_MODE_BLE_ONLY=y
+CONFIG_BTDM_CTRL_BLE_MAX_CONN=1
+CONFIG_BTDM_CTRL_MODEM_SLEEP=y
+CONFIG_BTDM_CTRL_MODEM_SLEEP_MODE_ORIG=y
+CONFIG_BTDM_CTRL_LPCLK_SEL_MAIN_XTAL=y
